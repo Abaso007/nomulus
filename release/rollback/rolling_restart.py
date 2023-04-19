@@ -61,11 +61,13 @@ def generate_steps(
 ) -> Tuple[steps.KillNomulusInstance, ...]:
     # yapf: enable
     instances = appengine_admin.list_instances(version)
-    return tuple([
-        steps.kill_nomulus_instance(appengine_admin.project, version,
-                                    inst.instance_name) for inst in instances
+    return tuple(
+        steps.kill_nomulus_instance(
+            appengine_admin.project, version, inst.instance_name
+        )
+        for inst in instances
         if inst.start_time <= started_before
-    ])
+    )
 
 
 def execute_steps(appengine_admin: appengine.AppEngineAdmin,

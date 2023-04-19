@@ -54,7 +54,7 @@ class Argument:
     choices: Optional[Tuple[str, ...]] = None
 
     def get_arg_attrs(self):
-        return dict((k, v) for k, v in vars(self).items() if k != 'arg_names')
+        return {k: v for k, v in vars(self).items() if k != 'arg_names'}
 
 
 ARGUMENTS = (Argument(('--dev_project', '-d'),

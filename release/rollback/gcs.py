@@ -90,8 +90,7 @@ class GcsClient:
             An immutable set of VersionKey instances.
         """
         mapping = self._get_release_to_version_mapping(env)
-        return frozenset(
-            [version for version in mapping if mapping[version] == nom_tag])
+        return frozenset(version for version in mapping if mapping[version] == nom_tag)
 
     def get_releases_by_versions(
             self, env: str,

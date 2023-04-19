@@ -34,10 +34,9 @@ class Property:
 
     def validate(self, value: str):
         """Verify that "value" is appropriate for the property."""
-        if type is bool:
-            if value not in ('true', 'false'):
-                raise ValidationError('value of {self.name} must be "true" or '
-                                      '"false".')
+        if type is bool and value not in ('true', 'false'):
+            raise ValidationError('value of {self.name} must be "true" or '
+                                  '"false".')
 
 @dataclasses.dataclass
 class GradleFlag:
@@ -328,8 +327,7 @@ def main(args) -> int:
     parser = argparse.ArgumentParser('nom_build', description=HELP_TEXT,
                                      formatter_class=argparse.RawTextHelpFormatter)
     for prop in PROPERTIES:
-        parser.add_argument('--' + prop.name, default=prop.default,
-                            help=prop.desc)
+        parser.add_argument(f'--{prop.name}', default=prop.default, help=prop.desc)
 
     # Add Gradle flags.  We set 'dest' to the first flag to get a name that is
     # predictable for getattr (even though it will have a leading '-' and thus
@@ -384,8 +382,7 @@ def main(args) -> int:
 
     # Add Gradle flags to the gradle argument list.
     for flag in GRADLE_FLAGS:
-        arg_val = getattr(args, flag.flags[0])
-        if arg_val:
+        if arg_val := getattr(args, flag.flags[0]):
             gradle_command.append(flag.flags[-1])
             if flag.has_arg:
                 gradle_command.append(arg_val)

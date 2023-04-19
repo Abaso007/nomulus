@@ -151,11 +151,12 @@ def _generate_steps(
                     appengine_admin, plan.target_version,
                     plan.target_version.manual_scaling_instances))
 
-    for plan in rollback_plan:
-        rollback_steps.append(
-            steps.direct_service_traffic_to_version(appengine_admin.project,
-                                                    plan.target_version))
-
+    rollback_steps.extend(
+        steps.direct_service_traffic_to_version(
+            appengine_admin.project, plan.target_version
+        )
+        for plan in rollback_plan
+    )
     for plan in rollback_plan:
         for version in plan.serving_versions:
             if version.scaling != common.AppEngineScaling.AUTOMATIC:
@@ -187,12 +188,12 @@ def get_rollback_plan(gcs_client: gcs.GcsClient,
     all_version_configs = appengine_admin.get_version_configs(
         target_versions.union(serving_versions))
 
-    target_configs = frozenset([
+    target_configs = frozenset(
         config for config in all_version_configs if config in target_versions
-    ])
-    serving_configs = frozenset([
+    )
+    serving_configs = frozenset(
         config for config in all_version_configs if config in serving_versions
-    ])
+    )
     rollback_plan = _get_service_rollback_plan(target_configs, serving_configs)
     return _generate_steps(gcs_client, appengine_admin, env, target_release,
                            rollback_plan)
