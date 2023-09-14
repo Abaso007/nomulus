@@ -124,7 +124,7 @@ class RollingRestartTestCase(unittest.TestCase):
         self._setup_execute_steps_tests()
         cmd = mock.MagicMock()
         cmd.instance_name = 'vm_to_delete'
-        cmds = tuple([cmd])  # yapf does not format (cmd,) correctly.
+        cmds = (cmd, )
         rolling_restart.execute_steps(appengine_admin=self._appengine_admin,
                                       version=self._version,
                                       cmds=cmds,
@@ -136,7 +136,7 @@ class RollingRestartTestCase(unittest.TestCase):
         self._setup_execute_steps_tests()
         cmd = mock.MagicMock()
         cmd.instance_name = 'vm_to_delete'
-        cmds = tuple([cmd])  # yapf does not format (cmd,) correctly.
+        cmds = (cmd, )
         rolling_restart.execute_steps(appengine_admin=self._appengine_admin,
                                       version=self._version,
                                       cmds=cmds,

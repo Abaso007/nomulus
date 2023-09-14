@@ -88,9 +88,10 @@ class AppEngineAdmin:
                 versions_with_traffic = (
                     service.get('split', {}).get('allocations', {}).keys())
                 # yapf: enable
-                for version in versions_with_traffic:
-                    versions.append(common.VersionKey(service['id'], version))
-
+                versions.extend(
+                    common.VersionKey(service['id'], version)
+                    for version in versions_with_traffic
+                )
         return frozenset(versions)
 
 
@@ -160,11 +161,12 @@ class AppEngineAdmin:
         # Format of version_list is defined at
         # https://googleapis.github.io/google-api-python-client/docs/dyn/appengine_v1beta.apps.services.versions.instances.html#list
 
-        return tuple([
+        return tuple(
             common.VmInstanceInfo(
-                inst['id'], common.parse_gcp_timestamp(inst['startTime']))
+                inst['id'], common.parse_gcp_timestamp(inst['startTime'])
+            )
             for inst in instances
-        ])
+        )
 
     def set_manual_scaling_num_instance(self, service_id: str, version_id: str,
                                         manual_instances: int) -> None:

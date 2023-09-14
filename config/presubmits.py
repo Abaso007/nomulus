@@ -77,9 +77,7 @@ class PresubmitCheck:
     with open(file, "r", encoding='utf8') as f:
       file_content = f.read()
       matches = re.match(self.regex, file_content, re.DOTALL)
-      if self.regex_type == FORBIDDEN:
-        return matches
-      return not matches
+      return matches if self.regex_type == FORBIDDEN else not matches
 
 
 PRESUBMITS = {
@@ -182,7 +180,7 @@ def get_seqnum(filename: str, location: str) -> int:
   """Extracts the sequence number from a filename."""
   m = FLYWAY_FILE_RX.match(filename)
   if m is None:
-    raise ValueError('Illegal Flyway filename: %s in %s' % (filename, location))
+    raise ValueError(f'Illegal Flyway filename: {filename} in {location}')
   return int(m.group(1))
 
 
@@ -205,11 +203,10 @@ def has_valid_order(indexed_files: List[Tuple[int, str]], location: str) -> bool
   valid = True
   for seqnum, filename in indexed_files:
     if seqnum == last_index:
-      print('duplicate Flyway file sequence number found in %s: %s' %
-            (location, filename))
+      print(f'duplicate Flyway file sequence number found in {location}: {filename}')
       valid = False
     elif seqnum < last_index:
-      print('File %s in %s is out of order.' % (filename, location))
+      print(f'File {filename} in {location} is out of order.')
       valid = False
     elif seqnum != last_index + 1:
       print('Missing Flyway sequence number %d in %s.  Next file is %s' %
@@ -238,14 +235,13 @@ def verify_flyway_index():
   with open('db/src/main/resources/sql/flyway.txt', encoding='utf8') as index:
     indexed_files = index.read().splitlines()
   if files != indexed_files:
-    unindexed = set(files) - set(indexed_files)
-    if unindexed:
-      print('The following Flyway files are not in flyway.txt: %s' % unindexed)
+    if unindexed := set(files) - set(indexed_files):
+      print(f'The following Flyway files are not in flyway.txt: {unindexed}')
 
-    nonexistent = set(indexed_files) - set(files)
-    if nonexistent:
-      print('The following files are in flyway.txt but not in the Flyway '
-            'directory: %s' % nonexistent)
+    if nonexistent := set(indexed_files) - set(files):
+      print(
+          f'The following files are in flyway.txt but not in the Flyway directory: {nonexistent}'
+      )
 
     # Do an ordering check on the index file (ignore the result, we're failing
     # anyway).
@@ -285,15 +281,13 @@ def get_files():
 
 
 if __name__ == "__main__":
-  print('python version is %s' % sys.version)
+  print(f'python version is {sys.version}')
   failed = False
   for file in get_files():
-    error_messages = []
-    for presubmit, error_message in PRESUBMITS.items():
-      if presubmit.fails(file):
-        error_messages.append(error_message)
-
-    if error_messages:
+    if error_messages := [
+        error_message for presubmit, error_message in PRESUBMITS.items()
+        if presubmit.fails(file)
+    ]:
       failed = True
       print("%s had errors: \n  %s" % (file, "\n  ".join(error_messages)))
 
