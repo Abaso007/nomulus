@@ -15,51 +15,59 @@
 package google.registry.ui.server.console;
 
 import static google.registry.request.Action.Method.GET;
+import static jakarta.servlet.http.HttpServletResponse.SC_OK;
 
-import com.google.api.client.http.HttpStatusCodes;
 import com.google.common.collect.ImmutableMap;
 import google.registry.config.RegistryConfig.Config;
 import google.registry.model.console.User;
 import google.registry.request.Action;
-import google.registry.request.Response;
+import google.registry.request.Action.GaeService;
+import google.registry.request.Action.GkeService;
 import google.registry.request.auth.Auth;
-import google.registry.request.auth.AuthResult;
-import google.registry.request.auth.UserAuthInfo;
-import google.registry.ui.server.registrar.JsonGetAction;
+import google.registry.security.XsrfTokenManager;
+import jakarta.servlet.http.Cookie;
 import javax.inject.Inject;
 import org.json.JSONObject;
 
 @Action(
-    service = Action.Service.DEFAULT,
+    service = GaeService.DEFAULT,
+    gkeService = GkeService.CONSOLE,
     path = ConsoleUserDataAction.PATH,
     method = {GET},
     auth = Auth.AUTH_PUBLIC_LOGGED_IN)
-public class ConsoleUserDataAction implements JsonGetAction {
+public class ConsoleUserDataAction extends ConsoleApiAction {
 
   public static final String PATH = "/console-api/userdata";
 
-  private final AuthResult authResult;
-  private final Response response;
+  private final String productName;
+  private final String supportPhoneNumber;
+  private final String supportEmail;
   private final String technicalDocsUrl;
 
   @Inject
   public ConsoleUserDataAction(
-      AuthResult authResult,
-      Response response,
+      ConsoleApiParams consoleApiParams,
+      @Config("productName") String productName,
+      @Config("supportEmail") String supportEmail,
+      @Config("supportPhoneNumber") String supportPhoneNumber,
       @Config("technicalDocsUrl") String technicalDocsUrl) {
-    this.response = response;
-    this.authResult = authResult;
+    super(consoleApiParams);
+    this.productName = productName;
+    this.supportEmail = supportEmail;
+    this.supportPhoneNumber = supportPhoneNumber;
     this.technicalDocsUrl = technicalDocsUrl;
   }
 
   @Override
-  public void run() {
-    UserAuthInfo authInfo = authResult.userAuthInfo().get();
-    if (!authInfo.consoleUser().isPresent()) {
-      response.setStatus(HttpStatusCodes.STATUS_CODE_UNAUTHORIZED);
-      return;
-    }
-    User user = authInfo.consoleUser().get();
+  protected void getHandler(User user) {
+    // As this is the first GET request, we use it as an opportunity to set a XSRF cookie
+    // for angular to read - https://angular.io/guide/http-security-xsrf-protection
+    Cookie xsrfCookie =
+        new Cookie(
+            XsrfTokenManager.X_CSRF_TOKEN,
+            consoleApiParams.xsrfTokenManager().generateToken(user.getEmailAddress()));
+    xsrfCookie.setSecure(true);
+    consoleApiParams.response().addCookie(xsrfCookie);
 
     JSONObject json =
         new JSONObject(
@@ -74,10 +82,16 @@ public class ConsoleUserDataAction implements JsonGetAction {
                 // auth checks.
                 "isAdmin", user.getUserRoles().isAdmin(),
                 "globalRole", user.getUserRoles().getGlobalRole(),
+                // registrar-specific roles
+                "userRoles", user.getUserRoles().getRegistrarRoles(),
+                // Include static contact resources in this call to minimize round trips
+                "productName", productName,
+                "supportEmail", supportEmail,
+                "supportPhoneNumber", supportPhoneNumber,
                 // Is used by UI to construct a link to registry resources
                 "technicalDocsUrl", technicalDocsUrl));
 
-    response.setPayload(json.toString());
-    response.setStatus(HttpStatusCodes.STATUS_CODE_OK);
+    consoleApiParams.response().setPayload(json.toString());
+    consoleApiParams.response().setStatus(SC_OK);
   }
 }

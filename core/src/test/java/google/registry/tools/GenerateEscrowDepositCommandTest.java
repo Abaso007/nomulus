@@ -48,14 +48,14 @@ public class GenerateEscrowDepositCommandTest
             ParameterException.class,
             () ->
                 runCommand("--watermark=2017-01-01T00:00:00Z", "--mode=thin", "-r 42", "-o test"));
-    assertThat(thrown).hasMessageThat().contains("The following option is required: -t, --tld");
+    assertThat(thrown).hasMessageThat().contains("The following option is required: [-t | --tld]");
   }
 
   @Test
   void testCommand_emptyTld() {
-    IllegalArgumentException thrown =
+    ParameterException thrown =
         assertThrows(
-            IllegalArgumentException.class,
+            ParameterException.class,
             () ->
                 runCommand(
                     "--tld=",
@@ -63,7 +63,7 @@ public class GenerateEscrowDepositCommandTest
                     "--mode=thin",
                     "-r 42",
                     "-o test"));
-    assertThat(thrown).hasMessageThat().contains("Null or empty TLD specified");
+    assertThat(thrown).hasMessageThat().contains("At least one TLD must be specified");
   }
 
   @Test
@@ -89,16 +89,25 @@ public class GenerateEscrowDepositCommandTest
             () -> runCommand("--tld=tld", "--mode=full", "-r 42", "-o test"));
     assertThat(thrown)
         .hasMessageThat()
-        .contains("The following option is required: -w, --watermark");
+        .contains("The following option is required: [-w | --watermark]");
   }
 
   @Test
   void testCommand_emptyWatermark() {
+    ParameterException thrown =
+        assertThrows(
+            ParameterException.class,
+            () -> runCommand("--tld=tld", "--watermark=", "--mode=full", "-r 42", "-o test"));
+    assertThat(thrown).hasMessageThat().contains("At least one watermark must be specified");
+  }
+
+  @Test
+  void testCommand_malformedWatermark() {
     IllegalArgumentException thrown =
         assertThrows(
             IllegalArgumentException.class,
-            () -> runCommand("--tld=tld", "--watermark=", "--mode=full", "-r 42", "-o test"));
-    assertThat(thrown).hasMessageThat().contains("Invalid format: \"\"");
+            () -> runCommand("--tld=tld", "--watermark=blah", "--mode=full", "-r 42", "-o test"));
+    assertThat(thrown).hasMessageThat().contains("Invalid format: \"blah\"");
   }
 
   @Test
@@ -109,7 +118,9 @@ public class GenerateEscrowDepositCommandTest
             () ->
                 runCommand(
                     "--tld=tld", "--watermark=2017-01-01T00:00:00Z", "--mode=thin", "-r 42"));
-    assertThat(thrown).hasMessageThat().contains("The following option is required: -o, --outdir");
+    assertThat(thrown)
+        .hasMessageThat()
+        .contains("The following option is required: [-o | --outdir]");
   }
 
   @Test
@@ -156,7 +167,7 @@ public class GenerateEscrowDepositCommandTest
                     "-o test"));
     assertThat(thrown)
         .hasMessageThat()
-        .contains("Invalid value for -m parameter. Allowed values:[FULL, THIN]");
+        .contains("Invalid value for --mode parameter. Allowed values:[FULL, THIN]");
   }
 
   @Test

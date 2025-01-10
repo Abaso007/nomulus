@@ -120,9 +120,9 @@
     <url><![CDATA[/_dr/cron/fanout?queue=retryable-cron-tasks&endpoint=/_dr/task/deleteProberData&runInEmpty]]></url>
     <name>deleteProberData</name>
     <description>
-      This job clears out data from probers and runs once a week.
+      This job clears out data from probers and runs daily.
     </description>
-    <schedule>0 14 * * 1</schedule>
+    <schedule>0 14 * * *</schedule>
   </task>
 
   <task>
@@ -161,5 +161,39 @@
       that have been in the database for a certain period of time.
     </description>
     <schedule>0 15 * * 1</schedule>
+  </task>
+
+  <task>
+    <url><![CDATA[/_dr/task/bsaDownload]]></url>
+    <name>bsaDownload</name>
+    <service>bsa</service>
+    <description>
+      Downloads the BSA block lists and processes the changes.
+    </description>
+    <!-- Runs every hour. -->
+    <schedule>0 * * * *</schedule>
+  </task>
+
+  <task>
+    <url><![CDATA[/_dr/task/bsaRefresh]]></url>
+    <name>bsaRefresh</name>
+    <service>bsa</service>
+    <description>
+      Checks for changes in registered domains and reserved labels, and updates
+      the unblockable domains list.
+    </description>
+    <!-- Runs every 30 minutes. -->
+    <schedule>15,45 * * * *</schedule>
+  </task>
+
+  <task>
+    <url><![CDATA[/_dr/task/uploadBsaUnavailableNames]]></url>
+    <name>uploadBsaUnavailableNames</name>
+    <description>
+      This job uploads all unavailable domain names (those registered and
+      reserved) to the BSA.
+    </description>
+    <service>bsa</service>
+    <schedule>23 8,20 * * *</schedule>
   </task>
 </entries>

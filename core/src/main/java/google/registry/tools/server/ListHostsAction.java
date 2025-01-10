@@ -15,15 +15,17 @@
 package google.registry.tools.server;
 
 import static com.google.common.collect.ImmutableSortedSet.toImmutableSortedSet;
-import static google.registry.persistence.transaction.TransactionManagerFactory.tm;
+import static google.registry.persistence.transaction.BatchedQueries.loadAllOf;
 import static google.registry.request.Action.Method.GET;
 import static google.registry.request.Action.Method.POST;
 import static java.util.Comparator.comparing;
 
+import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableSet;
 import google.registry.model.EppResourceUtils;
 import google.registry.model.host.Host;
 import google.registry.request.Action;
+import google.registry.request.Action.GaeService;
 import google.registry.request.auth.Auth;
 import google.registry.util.Clock;
 import javax.inject.Inject;
@@ -31,10 +33,10 @@ import org.joda.time.DateTime;
 
 /** An action that lists hosts, for use by the {@code nomulus list_hosts} command. */
 @Action(
-    service = Action.Service.TOOLS,
+    service = GaeService.TOOLS,
     path = ListHostsAction.PATH,
     method = {GET, POST},
-    auth = Auth.AUTH_API_ADMIN)
+    auth = Auth.AUTH_ADMIN)
 public final class ListHostsAction extends ListObjectsAction<Host> {
 
   public static final String PATH = "/_dr/admin/list/hosts";
@@ -50,7 +52,8 @@ public final class ListHostsAction extends ListObjectsAction<Host> {
   @Override
   public ImmutableSet<Host> loadObjects() {
     final DateTime now = clock.nowUtc();
-    return tm().transact(() -> tm().loadAllOf(Host.class)).stream()
+    return loadAllOf(Host.class)
+        .flatMap(ImmutableList::stream)
         .filter(host -> EppResourceUtils.isActive(host, now))
         .collect(toImmutableSortedSet(comparing(Host::getHostName)));
   }

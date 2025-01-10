@@ -21,8 +21,9 @@ import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Ascii;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
-import google.registry.config.RegistryEnvironment;
-import google.registry.config.SystemPropertySetter;
+import google.registry.util.RegistryEnvironment;
+import google.registry.util.SystemPropertySetter;
+import java.util.Map;
 
 /** Enum of production environments, used for the {@code --environment} flag. */
 public enum RegistryToolEnvironment {
@@ -93,7 +94,7 @@ public enum RegistryToolEnvironment {
   void setup(SystemPropertySetter systemPropertySetter) {
     instance = this;
     actualEnvironment.setup(systemPropertySetter);
-    for (ImmutableMap.Entry<String, String> entry : extraProperties.entrySet()) {
+    for (Map.Entry<String, String> entry : extraProperties.entrySet()) {
       systemPropertySetter.setProperty(entry.getKey(), entry.getValue());
     }
   }

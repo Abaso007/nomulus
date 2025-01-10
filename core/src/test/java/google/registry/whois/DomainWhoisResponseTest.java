@@ -41,6 +41,7 @@ import google.registry.persistence.transaction.JpaTestExtensions;
 import google.registry.persistence.transaction.JpaTestExtensions.JpaIntegrationTestExtension;
 import google.registry.testing.FakeClock;
 import google.registry.whois.WhoisResponse.WhoisResponseResults;
+import java.util.Optional;
 import org.joda.time.DateTime;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -264,7 +265,7 @@ class DomainWhoisResponseTest {
                         StatusValue.CLIENT_RENEW_PROHIBITED,
                         StatusValue.CLIENT_TRANSFER_PROHIBITED,
                         StatusValue.SERVER_UPDATE_PROHIBITED))
-                .setRegistrant(registrantResourceKey)
+                .setRegistrant(Optional.of(registrantResourceKey))
                 .setContacts(
                     ImmutableSet.of(
                         DesignatedContact.create(DesignatedContact.Type.ADMIN, adminResourceKey),
@@ -289,6 +290,40 @@ class DomainWhoisResponseTest {
                 false,
                 "Doodle Disclaimer\nI exist so that carriage return\nin disclaimer can be tested."))
         .isEqualTo(WhoisResponseResults.create(loadFile("whois_domain.txt"), 1));
+  }
+
+  @Test
+  void getPlainTextOutputTest_noRegistrant() {
+    DomainWhoisResponse domainWhoisResponse =
+        new DomainWhoisResponse(
+            domain.asBuilder().setRegistrant(Optional.empty()).build(),
+            false,
+            "Please contact registrar",
+            clock.nowUtc());
+    assertThat(
+            domainWhoisResponse.getResponse(
+                false,
+                "Doodle Disclaimer\nI exist so that carriage return\nin disclaimer can be tested."))
+        .isEqualTo(WhoisResponseResults.create(loadFile("whois_domain_no_registrant.txt"), 1));
+  }
+
+  @Test
+  void getPlainTextOutputTest_noContacts() {
+    DomainWhoisResponse domainWhoisResponse =
+        new DomainWhoisResponse(
+            domain
+                .asBuilder()
+                .setRegistrant(Optional.empty())
+                .setContacts(ImmutableSet.of())
+                .build(),
+            false,
+            "Please contact registrar",
+            clock.nowUtc());
+    assertThat(
+            domainWhoisResponse.getResponse(
+                false,
+                "Doodle Disclaimer\nI exist so that carriage return\nin disclaimer can be tested."))
+        .isEqualTo(WhoisResponseResults.create(loadFile("whois_domain_no_contacts.txt"), 1));
   }
 
   @Test
@@ -326,8 +361,10 @@ class DomainWhoisResponseTest {
             domainWhoisResponse
                 .getResponse(
                     false,
-                    "Doodle Disclaimer\nI exist so that carriage return\n"
-                        + "in disclaimer can be tested.")
+                    """
+                        Doodle Disclaimer
+                        I exist so that carriage return
+                        in disclaimer can be tested.""")
                 .plainTextOutput())
         .contains("Domain Status: ok");
   }

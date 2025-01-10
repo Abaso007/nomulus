@@ -34,10 +34,14 @@ import dagger.BindsOptionalOf;
 import dagger.Module;
 import dagger.Provides;
 import google.registry.config.RegistryConfig.Config;
+import google.registry.keyring.KeyringModule;
+import google.registry.keyring.api.DummyKeyringModule;
+import google.registry.keyring.secretmanager.SecretManagerKeyringModule;
 import google.registry.persistence.transaction.CloudSqlCredentialSupplier;
 import google.registry.persistence.transaction.JpaTransactionManager;
 import google.registry.persistence.transaction.JpaTransactionManagerImpl;
 import google.registry.persistence.transaction.TransactionManager;
+import google.registry.privileges.secretmanager.SecretManagerModule;
 import google.registry.privileges.secretmanager.SqlCredential;
 import google.registry.privileges.secretmanager.SqlCredentialStore;
 import google.registry.privileges.secretmanager.SqlUser;
@@ -45,6 +49,8 @@ import google.registry.privileges.secretmanager.SqlUser.RobotId;
 import google.registry.privileges.secretmanager.SqlUser.RobotUser;
 import google.registry.tools.AuthModule.CloudSqlClientCredential;
 import google.registry.util.Clock;
+import jakarta.persistence.EntityManagerFactory;
+import jakarta.persistence.Persistence;
 import java.lang.annotation.Documented;
 import java.sql.Connection;
 import java.sql.DriverManager;
@@ -58,12 +64,17 @@ import javax.annotation.Nullable;
 import javax.inject.Provider;
 import javax.inject.Qualifier;
 import javax.inject.Singleton;
-import javax.persistence.EntityManagerFactory;
-import javax.persistence.Persistence;
 import org.hibernate.cfg.Environment;
 
 /** Dagger module class for the persistence layer. */
-@Module
+// TODO(b/388835696): Use SecreteManagerKeyring in all environments and drop the `includes` below.
+@Module(
+    includes = {
+      KeyringModule.class,
+      SecretManagerModule.class,
+      DummyKeyringModule.class,
+      SecretManagerKeyringModule.class
+    })
 public abstract class PersistenceModule {
 
   // This name must be the same as the one defined in persistence.xml.
@@ -220,8 +231,8 @@ public abstract class PersistenceModule {
 
   @Provides
   @Singleton
-  @AppEngineJpaTm
-  static JpaTransactionManager provideAppEngineJpaTm(
+  @DefaultJpaTm
+  static JpaTransactionManager provideDefaultJpaTm(
       SqlCredentialStore credentialStore,
       @PartialCloudSqlConfigs ImmutableMap<String, String> cloudSqlConfigs,
       Clock clock) {
@@ -267,7 +278,7 @@ public abstract class PersistenceModule {
         name -> overrides.put(HIKARI_DS_CLOUD_SQL_INSTANCE, name));
     overrides.put(
         Environment.ISOLATION, TransactionIsolationLevel.TRANSACTION_REPEATABLE_READ.name());
-    return new JpaTransactionManagerImpl(create(overrides), clock);
+    return new JpaTransactionManagerImpl(create(overrides), clock, true);
   }
 
   @Provides
@@ -283,7 +294,7 @@ public abstract class PersistenceModule {
         name -> overrides.put(HIKARI_DS_CLOUD_SQL_INSTANCE, name));
     overrides.put(
         Environment.ISOLATION, TransactionIsolationLevel.TRANSACTION_REPEATABLE_READ.name());
-    return new JpaTransactionManagerImpl(create(overrides), clock);
+    return new JpaTransactionManagerImpl(create(overrides), clock, true);
   }
 
   /** Constructs the {@link EntityManagerFactory} instance. */
@@ -380,10 +391,10 @@ public abstract class PersistenceModule {
   @Documented
   public @interface SchemaManagerConnection {}
 
-  /** Dagger qualifier for {@link JpaTransactionManager} used for App Engine application. */
+  /** Dagger qualifier for {@link JpaTransactionManager} used by default. */
   @Qualifier
   @Documented
-  @interface AppEngineJpaTm {}
+  @interface DefaultJpaTm {}
 
   /** Dagger qualifier for {@link JpaTransactionManager} used inside BEAM pipelines. */
   @Qualifier

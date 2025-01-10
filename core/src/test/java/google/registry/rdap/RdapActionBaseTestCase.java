@@ -22,14 +22,13 @@ import static google.registry.request.Action.Method.GET;
 import static google.registry.request.Action.Method.HEAD;
 import static org.mockito.Mockito.mock;
 
-import com.google.appengine.api.users.User;
 import com.google.gson.JsonObject;
+import google.registry.model.console.User;
+import google.registry.model.console.UserRoles;
 import google.registry.persistence.transaction.JpaTestExtensions;
 import google.registry.persistence.transaction.JpaTestExtensions.JpaIntegrationTestExtension;
 import google.registry.request.Actions;
 import google.registry.request.auth.AuthResult;
-import google.registry.request.auth.AuthSettings.AuthLevel;
-import google.registry.request.auth.UserAuthInfo;
 import google.registry.testing.FakeClock;
 import google.registry.testing.FakeResponse;
 import google.registry.util.Idn;
@@ -43,22 +42,27 @@ import org.junit.jupiter.api.extension.RegisterExtension;
 /** Common unit test code for actions inheriting {@link RdapActionBase}. */
 abstract class RdapActionBaseTestCase<A extends RdapActionBase> {
 
+  protected final FakeClock clock = new FakeClock(DateTime.parse("2000-01-01TZ"));
+
   @RegisterExtension
   final JpaIntegrationTestExtension jpa =
-      new JpaTestExtensions.Builder().buildIntegrationTestExtension();
+      new JpaTestExtensions.Builder().withClock(clock).buildIntegrationTestExtension();
 
   protected static final AuthResult AUTH_RESULT =
-      AuthResult.create(
-          AuthLevel.USER,
-          UserAuthInfo.create(new User("rdap.user@user.com", "gmail.com", "12345"), false));
+      AuthResult.createUser(
+          new User.Builder()
+              .setEmailAddress("rdap.user@user.com")
+              .setUserRoles(new UserRoles.Builder().setIsAdmin(false).build())
+              .build());
 
   protected static final AuthResult AUTH_RESULT_ADMIN =
-      AuthResult.create(
-          AuthLevel.USER,
-          UserAuthInfo.create(new User("rdap.admin@google.com", "gmail.com", "12345"), true));
+      AuthResult.createUser(
+          new User.Builder()
+              .setEmailAddress("rdap.admin@google.com")
+              .setUserRoles(new UserRoles.Builder().setIsAdmin(true).build())
+              .build());
 
   protected FakeResponse response = new FakeResponse();
-  protected final FakeClock clock = new FakeClock(DateTime.parse("2000-01-01TZ"));
   final RdapMetrics rdapMetrics = mock(RdapMetrics.class);
 
   RdapAuthorization.Role metricRole = PUBLIC;
@@ -117,27 +121,15 @@ abstract class RdapActionBaseTestCase<A extends RdapActionBase> {
   }
 
   JsonObject generateExpectedJsonError(String description, int code) {
-    String title;
-    switch (code) {
-      case 404:
-        title = "Not Found";
-        break;
-      case 500:
-        title = "Internal Server Error";
-        break;
-      case 501:
-        title = "Not Implemented";
-        break;
-      case 400:
-        title = "Bad Request";
-        break;
-      case 422:
-        title = "Unprocessable Entity";
-        break;
-      default:
-        title = "ERR";
-        break;
-    }
+    String title =
+        switch (code) {
+          case 404 -> "Not Found";
+          case 500 -> "Internal Server Error";
+          case 501 -> "Not Implemented";
+          case 400 -> "Bad Request";
+          case 422 -> "Unprocessable Entity";
+          default -> "ERR";
+        };
     return RdapTestHelper.loadJsonFile(
         "rdap_error.json",
         "DESCRIPTION",

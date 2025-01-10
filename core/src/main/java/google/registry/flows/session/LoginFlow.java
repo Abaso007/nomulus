@@ -28,11 +28,17 @@ import google.registry.flows.EppException.CommandUseErrorException;
 import google.registry.flows.EppException.ParameterValuePolicyErrorException;
 import google.registry.flows.EppException.UnimplementedExtensionException;
 import google.registry.flows.EppException.UnimplementedObjectServiceException;
+import google.registry.flows.EppException.UnimplementedProtocolVersionException;
 import google.registry.flows.ExtensionManager;
 import google.registry.flows.FlowModule.RegistrarId;
+import google.registry.flows.FlowUtils.GenericXmlSyntaxErrorException;
 import google.registry.flows.MutatingFlow;
 import google.registry.flows.SessionMetadata;
+import google.registry.flows.TlsCredentials.BadRegistrarCertificateException;
+import google.registry.flows.TlsCredentials.BadRegistrarIpAddressException;
+import google.registry.flows.TlsCredentials.MissingRegistrarCertificateException;
 import google.registry.flows.TransportCredentials;
+import google.registry.flows.TransportCredentials.BadRegistrarPasswordException;
 import google.registry.model.eppcommon.ProtocolDefinition;
 import google.registry.model.eppcommon.ProtocolDefinition.ServiceExtension;
 import google.registry.model.eppinput.EppInput;
@@ -48,14 +54,14 @@ import javax.inject.Inject;
 /**
  * An EPP flow for login.
  *
- * @error {@link google.registry.flows.EppException.UnimplementedExtensionException}
- * @error {@link google.registry.flows.EppException.UnimplementedObjectServiceException}
- * @error {@link google.registry.flows.EppException.UnimplementedProtocolVersionException}
- * @error {@link google.registry.flows.FlowUtils.GenericXmlSyntaxErrorException}
- * @error {@link google.registry.flows.TlsCredentials.BadRegistrarCertificateException}
- * @error {@link google.registry.flows.TlsCredentials.BadRegistrarIpAddressException}
- * @error {@link google.registry.flows.TlsCredentials.MissingRegistrarCertificateException}
- * @error {@link google.registry.flows.TransportCredentials.BadRegistrarPasswordException}
+ * @error {@link UnimplementedExtensionException}
+ * @error {@link UnimplementedObjectServiceException}
+ * @error {@link UnimplementedProtocolVersionException}
+ * @error {@link GenericXmlSyntaxErrorException}
+ * @error {@link BadRegistrarCertificateException}
+ * @error {@link BadRegistrarIpAddressException}
+ * @error {@link MissingRegistrarCertificateException}
+ * @error {@link BadRegistrarPasswordException}
  * @error {@link LoginFlow.AlreadyLoggedInException}
  * @error {@link BadRegistrarIdException}
  * @error {@link LoginFlow.TooManyFailedLoginsException}
@@ -116,7 +122,7 @@ public class LoginFlow implements MutatingFlow {
       serviceExtensionUrisBuilder.add(uri);
     }
     Optional<Registrar> registrar = Registrar.loadByRegistrarIdCached(login.getClientId());
-    if (!registrar.isPresent()) {
+    if (registrar.isEmpty()) {
       throw new BadRegistrarIdException(login.getClientId());
     }
 
@@ -134,13 +140,15 @@ public class LoginFlow implements MutatingFlow {
     if (!registrar.get().isLive()) {
       throw new RegistrarAccountNotActiveException();
     }
+
     if (login.getNewPassword().isPresent()) {
+      String newPassword = login.getNewPassword().get();
       // Load fresh from database (bypassing the cache) to ensure we don't save stale data.
       Optional<Registrar> freshRegistrar = Registrar.loadByRegistrarId(login.getClientId());
-      if (!freshRegistrar.isPresent()) {
+      if (freshRegistrar.isEmpty()) {
         throw new BadRegistrarIdException(login.getClientId());
       }
-      tm().put(freshRegistrar.get().asBuilder().setPassword(login.getNewPassword().get()).build());
+      tm().put(freshRegistrar.get().asBuilder().setPassword(newPassword).build());
     }
 
     // We are in!
@@ -152,35 +160,35 @@ public class LoginFlow implements MutatingFlow {
 
   /** Registrar with this ID could not be found. */
   static class BadRegistrarIdException extends AuthenticationErrorException {
-    public BadRegistrarIdException(String registrarId) {
+    BadRegistrarIdException(String registrarId) {
       super("Registrar with this ID could not be found: " + registrarId);
     }
   }
 
   /** Registrar login failed too many times. */
   static class TooManyFailedLoginsException extends AuthenticationErrorClosingConnectionException {
-    public TooManyFailedLoginsException() {
+    TooManyFailedLoginsException() {
       super("Registrar login failed too many times");
     }
   }
 
   /** Registrar account is not active. */
   static class RegistrarAccountNotActiveException extends AuthorizationErrorException {
-    public RegistrarAccountNotActiveException() {
+    RegistrarAccountNotActiveException() {
       super("Registrar account is not active");
     }
   }
 
   /** Registrar is already logged in. */
   static class AlreadyLoggedInException extends CommandUseErrorException {
-    public AlreadyLoggedInException() {
+    AlreadyLoggedInException() {
       super("Registrar is already logged in");
     }
   }
 
   /** Specified language is not supported. */
   static class UnsupportedLanguageException extends ParameterValuePolicyErrorException {
-    public UnsupportedLanguageException() {
+    UnsupportedLanguageException() {
       super("Specified language is not supported");
     }
   }

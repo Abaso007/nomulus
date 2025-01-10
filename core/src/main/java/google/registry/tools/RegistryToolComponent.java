@@ -39,8 +39,6 @@ import google.registry.privileges.secretmanager.SecretManagerModule;
 import google.registry.rde.RdeModule;
 import google.registry.request.Modules.GsonModule;
 import google.registry.request.Modules.UrlConnectionServiceModule;
-import google.registry.request.Modules.UrlFetchServiceModule;
-import google.registry.request.Modules.UserServiceModule;
 import google.registry.tools.AuthModule.LocalCredentialModule;
 import google.registry.util.UtilsModule;
 import google.registry.whois.NonCachingWhoisModule;
@@ -56,7 +54,6 @@ import javax.inject.Singleton;
 @Singleton
 @Component(
     modules = {
-      AppEngineAdminApiModule.class,
       AuthModule.class,
       BatchModule.class,
       BigqueryModule.class,
@@ -77,8 +74,6 @@ import javax.inject.Singleton;
       SecretManagerKeyringModule.class,
       SecretManagerModule.class,
       UrlConnectionServiceModule.class,
-      UrlFetchServiceModule.class,
-      UserServiceModule.class,
       UtilsModule.class,
       VoidDnsWriterModule.class,
       NonCachingWhoisModule.class
@@ -104,7 +99,11 @@ interface RegistryToolComponent {
 
   void inject(CreateRegistrarCommand command);
 
-  void inject(CreateTldCommand command);
+  void inject(CreateUserCommand command);
+
+  void inject(CurlCommand command);
+
+  void inject(DeleteUserCommand command);
 
   void inject(EncryptEscrowDepositCommand command);
 
@@ -122,7 +121,10 @@ interface RegistryToolComponent {
 
   void inject(GetDomainCommand command);
 
+  void inject(GetFeatureFlagCommand command);
+
   void inject(GetHostCommand command);
+
   void inject(GetKeyringSecretCommand command);
 
   void inject(GetSqlCredentialCommand command);
@@ -132,6 +134,8 @@ interface RegistryToolComponent {
   void inject(GhostrydeCommand command);
 
   void inject(ListCursorsCommand command);
+
+  void inject(ListFeatureFlagsCommand command);
 
   void inject(LockDomainCommand command);
 
@@ -163,8 +167,6 @@ interface RegistryToolComponent {
 
   void inject(UpdateRegistrarCommand command);
 
-  void inject(UpdateTldCommand command);
-
   void inject(ValidateEscrowDepositCommand command);
 
   void inject(ValidateLoginCredentialsCommand command);
@@ -189,6 +191,12 @@ interface RegistryToolComponent {
 
     @BindsInstance
     Builder sqlAccessInfoFile(@Nullable @Config("sqlAccessInfoFile") String sqlAccessInfoFile);
+
+    @BindsInstance
+    Builder useGke(@Config("useGke") boolean useGke);
+
+    @BindsInstance
+    Builder useCanary(@Config("useCanary") boolean useCanary);
 
     RegistryToolComponent build();
   }

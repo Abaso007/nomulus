@@ -18,13 +18,13 @@ import static com.google.common.base.Preconditions.checkNotNull;
 import static google.registry.persistence.transaction.TransactionManagerFactory.tm;
 
 import google.registry.model.common.CrossTldSingleton;
+import jakarta.persistence.Column;
 import java.util.Optional;
 import javax.annotation.concurrent.Immutable;
-import javax.persistence.Column;
 import org.joda.time.DateTime;
 
 /** Singleton for ICANN's TMCH CA certificate revocation list (CRL). */
-@javax.persistence.Entity
+@jakarta.persistence.Entity
 @Immutable
 public final class TmchCrl extends CrossTldSingleton {
 
@@ -39,7 +39,8 @@ public final class TmchCrl extends CrossTldSingleton {
 
   /** Returns the singleton instance of this entity, without memoization. */
   public static Optional<TmchCrl> get() {
-    return tm().transact(() -> tm().loadSingleton(TmchCrl.class));
+    // TODO(b/368069206): move transaction up to `TmchCertificateAuthority#updateCrl`
+    return tm().reTransact(() -> tm().loadSingleton(TmchCrl.class));
   }
 
   /**
@@ -60,17 +61,17 @@ public final class TmchCrl extends CrossTldSingleton {
   }
 
   /** ASCII-armored X.509 certificate revocation list. */
-  public final String getCrl() {
+  public String getCrl() {
     return crl;
   }
 
   /** Returns the URL that the CRL was downloaded from. */
-  public final String getUrl() {
+  public String getUrl() {
     return crl;
   }
 
   /** Time we last updated the Database with a newer ICANN CRL. */
-  public final DateTime getUpdated() {
+  public DateTime getUpdated() {
     return updated;
   }
 }

@@ -18,13 +18,13 @@ import dagger.Component;
 import google.registry.config.CredentialModule;
 import google.registry.config.RegistryConfig.ConfigModule;
 import google.registry.keyring.secretmanager.SecretManagerKeyringModule;
-import google.registry.persistence.PersistenceModule.AppEngineJpaTm;
+import google.registry.persistence.PersistenceModule.DefaultJpaTm;
 import google.registry.persistence.PersistenceModule.ReadOnlyReplicaJpaTm;
 import google.registry.persistence.transaction.JpaTransactionManager;
 import google.registry.privileges.secretmanager.SecretManagerModule;
 import google.registry.util.UtilsModule;
+import jakarta.persistence.EntityManagerFactory;
 import javax.inject.Singleton;
-import javax.persistence.EntityManagerFactory;
 
 /** Dagger component to provide {@link EntityManagerFactory} instances. */
 @Singleton
@@ -39,8 +39,8 @@ import javax.persistence.EntityManagerFactory;
     })
 public interface PersistenceComponent {
 
-  @AppEngineJpaTm
-  JpaTransactionManager appEngineJpaTransactionManager();
+  @DefaultJpaTm
+  JpaTransactionManager jpaTransactionManager();
 
   @ReadOnlyReplicaJpaTm
   JpaTransactionManager readOnlyReplicaJpaTransactionManager();
