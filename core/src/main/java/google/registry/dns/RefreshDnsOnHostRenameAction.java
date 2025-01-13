@@ -18,7 +18,7 @@ import static google.registry.dns.DnsUtils.requestDomainDnsRefresh;
 import static google.registry.dns.RefreshDnsOnHostRenameAction.PATH;
 import static google.registry.model.EppResourceUtils.getLinkedDomainKeys;
 import static google.registry.persistence.transaction.TransactionManagerFactory.tm;
-import static javax.servlet.http.HttpServletResponse.SC_NO_CONTENT;
+import static jakarta.servlet.http.HttpServletResponse.SC_NO_CONTENT;
 
 import com.google.common.net.MediaType;
 import google.registry.model.EppResourceUtils;
@@ -26,7 +26,7 @@ import google.registry.model.domain.Domain;
 import google.registry.model.host.Host;
 import google.registry.persistence.VKey;
 import google.registry.request.Action;
-import google.registry.request.Action.Service;
+import google.registry.request.Action.GaeService;
 import google.registry.request.Parameter;
 import google.registry.request.Response;
 import google.registry.request.auth.Auth;
@@ -34,10 +34,10 @@ import javax.inject.Inject;
 import org.joda.time.DateTime;
 
 @Action(
-    service = Service.BACKEND,
+    service = GaeService.BACKEND,
     path = PATH,
     method = Action.Method.POST,
-    auth = Auth.AUTH_API_ADMIN)
+    auth = Auth.AUTH_ADMIN)
 public class RefreshDnsOnHostRenameAction implements Runnable {
 
   public static final String QUEUE_HOST_RENAME = "async-host-rename";

@@ -1,4 +1,4 @@
-// Copyright 2023 The Nomulus Authors. All Rights Reserved.
+// Copyright 2024 The Nomulus Authors. All Rights Reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -13,23 +13,20 @@
 // limitations under the License.
 
 import { Injectable } from '@angular/core';
-import { tap } from 'rxjs';
-import { RegistrarService } from 'src/app/registrar/registrar.service';
+import { switchMap, timeout } from 'rxjs';
+import {
+  IpAllowListItem,
+  RegistrarService,
+  SecuritySettings,
+  SecuritySettingsBackendModel,
+} from 'src/app/registrar/registrar.service';
 import { BackendService } from 'src/app/shared/services/backend.service';
 
-interface ipAllowListItem {
-  value: string;
-}
-export interface SecuritySettings {
-  clientCertificate?: string;
-  failoverClientCertificate?: string;
-  ipAddressAllowList?: Array<ipAllowListItem>;
-}
-
-export interface SecuritySettingsBackendModel {
-  clientCertificate?: string;
-  failoverClientCertificate?: string;
-  ipAddressAllowList?: Array<string>;
+export interface EppPasswordBackendModel {
+  registrarId: string;
+  oldPassword: string;
+  newPassword: string;
+  newPasswordRepeat: string;
 }
 
 export function apiToUiConverter(
@@ -48,39 +45,42 @@ export function uiToApiConverter(
   return Object.assign({}, securitySettings, {
     ipAddressAllowList: (securitySettings.ipAddressAllowList || [])
       .filter((s) => s.value)
-      .map((ipAllowItem: ipAllowListItem) => ipAllowItem.value),
+      .map((ipAllowItem: IpAllowListItem) => ipAllowItem.value),
   });
 }
 
-@Injectable()
+@Injectable({
+  providedIn: 'root',
+})
 export class SecurityService {
   securitySettings: SecuritySettings = {};
+  isEditingSecurity: boolean = false;
+  isEditingPassword: boolean = false;
 
   constructor(
     private backend: BackendService,
     private registrarService: RegistrarService
   ) {}
 
-  fetchSecurityDetails() {
+  saveChanges(newSecuritySettings: SecuritySettings) {
     return this.backend
-      .getSecuritySettings(this.registrarService.activeRegistrarId)
+      .postSecuritySettings(
+        this.registrarService.registrarId(),
+        uiToApiConverter(newSecuritySettings)
+      )
       .pipe(
-        tap((securitySettings: SecuritySettingsBackendModel) => {
-          this.securitySettings = apiToUiConverter(securitySettings);
+        timeout(2000),
+        switchMap(() => {
+          return this.registrarService.loadRegistrars();
         })
       );
   }
 
-  saveChanges(newSecuritySettings: SecuritySettings) {
-    return this.backend
-      .postSecuritySettings(
-        this.registrarService.activeRegistrarId,
-        uiToApiConverter(newSecuritySettings)
-      )
-      .pipe(
-        tap((_) => {
-          this.securitySettings = newSecuritySettings;
-        })
-      );
+  saveEppPassword(data: EppPasswordBackendModel) {
+    return this.backend.postEppPasswordUpdate(data).pipe(
+      switchMap(() => {
+        return this.registrarService.loadRegistrars();
+      })
+    );
   }
 }

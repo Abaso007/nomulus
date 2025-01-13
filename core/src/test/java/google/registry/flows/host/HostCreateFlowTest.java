@@ -30,7 +30,6 @@ import static google.registry.testing.EppExceptionSubject.assertAboutEppExceptio
 import static google.registry.testing.HostSubject.assertAboutHosts;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
-import com.google.common.base.Strings;
 import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.ImmutableSet;
 import google.registry.flows.EppException;
@@ -69,9 +68,10 @@ class HostCreateFlowTest extends ResourceFlowTestCase<HostCreateFlow, Host> {
   private void setEppHostCreateInputWithIps(String hostName) {
     setEppHostCreateInput(
         hostName,
-        "<host:addr ip=\"v4\">192.0.2.2</host:addr>\n"
-            + "<host:addr ip=\"v4\">192.0.2.29</host:addr>\n"
-            + "<host:addr ip=\"v6\">1080:0:0:0:8:800:200C:417A</host:addr>");
+        """
+            <host:addr ip="v4">192.0.2.2</host:addr>
+            <host:addr ip="v4">192.0.2.29</host:addr>
+            <host:addr ip="v6">1080:0:0:0:8:800:200C:417A</host:addr>""");
   }
 
   HostCreateFlowTest() {
@@ -259,7 +259,7 @@ class HostCreateFlowTest extends ResourceFlowTestCase<HostCreateFlow, Host> {
 
   @Test
   void testFailure_longHostName() {
-    setEppHostCreateInputWithIps("a" + Strings.repeat(".labelpart", 25) + ".tld");
+    setEppHostCreateInputWithIps("a" + ".labelpart".repeat(25) + ".tld");
     EppException thrown = assertThrows(HostNameTooLongException.class, this::runFlow);
     assertAboutEppExceptions().that(thrown).marshalsToXml();
   }
@@ -268,9 +268,10 @@ class HostCreateFlowTest extends ResourceFlowTestCase<HostCreateFlow, Host> {
   void testFailure_ip4AddressWithIp6Declaration() {
     setEppHostCreateInput(
         "ns1.example.tld",
-        "<host:addr ip=\"v4\">192.0.2.2</host:addr>\n"
-            + "<host:addr ip=\"v6\">192.0.2.29</host:addr>\n"
-            + "<host:addr ip=\"v6\">1080:0:0:0:8:800:200C:417A</host:addr>");
+        """
+            <host:addr ip="v4">192.0.2.2</host:addr>
+            <host:addr ip="v6">192.0.2.29</host:addr>
+            <host:addr ip="v6">1080:0:0:0:8:800:200C:417A</host:addr>""");
     EppException thrown = assertThrows(IpAddressVersionMismatchException.class, this::runFlow);
     assertAboutEppExceptions().that(thrown).marshalsToXml();
   }

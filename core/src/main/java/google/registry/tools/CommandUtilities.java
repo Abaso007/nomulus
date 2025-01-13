@@ -17,7 +17,6 @@ package google.registry.tools;
 import static com.google.common.base.Preconditions.checkState;
 
 import com.google.common.base.Ascii;
-import com.google.common.base.Strings;
 import google.registry.model.EppResource;
 import google.registry.model.ForeignKeyUtils;
 import google.registry.model.contact.Contact;
@@ -47,7 +46,7 @@ class CommandUtilities {
   }
 
   static String addHeader(String header, String body) {
-    return String.format("%s:\n%s\n%s", header, Strings.repeat("-", header.length() + 1), body);
+    return String.format("%s:\n%s\n%s", header, "-".repeat(header.length() + 1), body);
   }
 
   /** Prompts for yes/no input using promptText, defaulting to no. */

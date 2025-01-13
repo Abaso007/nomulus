@@ -16,8 +16,8 @@ package google.registry.sql.flyway;
 
 import static com.google.common.collect.ImmutableList.toImmutableList;
 import static com.google.common.collect.ImmutableSet.toImmutableSet;
+import static com.google.common.truth.Truth.assertThat;
 import static com.google.common.truth.Truth.assertWithMessage;
-import static com.google.common.truth.Truth8.assertThat;
 import static java.nio.charset.StandardCharsets.UTF_8;
 import static java.nio.file.Files.readAllLines;
 import static java.util.concurrent.TimeUnit.SECONDS;
@@ -45,8 +45,8 @@ import org.junit.jupiter.api.condition.EnabledIfSystemProperty;
  * <p>Flyway deploys each DDL script in one transaction. If a script modifies multiple schema
  * elements (table, index, sequence), it MAY hit deadlocks when applied on sandbox/production where
  * it'll be competing against live traffic that may also be locking said elements but in a different
- * order. This test checks every new script to be merged, counts the elements it locks, and raise an
- * error when there are more than one locked elements.
+ * order. This test checks every new script to be merged, counts the elements it locks, and raises
+ * an error when there is more than one locked element.
  *
  * <p>For deadlock-prevention purpose, we can ignore elements being created or dropped: our
  * schema-server compatibility tests ensure that such elements are not accessed by live traffic.
@@ -141,10 +141,7 @@ public class FlywayDeadlockTest {
             "create index if not exists index_name on public.element_name ...",
             "create index if not exists \"index_name\" on public.element_name ...",
             "create unique index public.index_name on public.\"element_name\" ...");
-    ddls.forEach(
-        ddl -> {
-          assertThat(getDdlLockedElementName(ddl)).hasValue("element_name");
-        });
+    ddls.forEach(ddl -> assertThat(getDdlLockedElementName(ddl)).hasValue("element_name"));
   }
 
   @Test
@@ -158,10 +155,7 @@ public class FlywayDeadlockTest {
             "drop table element_name ...;",
             "drop sequence element_name ...;",
             "drop INDEX element_name ...;");
-    ddls.forEach(
-        ddl -> {
-          assertThat(getDdlLockedElementName(ddl)).isEmpty();
-        });
+    ddls.forEach(ddl -> assertThat(getDdlLockedElementName(ddl)).isEmpty());
   }
 
   static Optional<String> getDdlLockedElementName(String ddl) {

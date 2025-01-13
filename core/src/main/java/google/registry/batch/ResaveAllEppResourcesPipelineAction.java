@@ -16,8 +16,8 @@ package google.registry.batch;
 
 import static google.registry.batch.BatchModule.PARAM_FAST;
 import static google.registry.beam.BeamUtils.createJobName;
-import static javax.servlet.http.HttpServletResponse.SC_INTERNAL_SERVER_ERROR;
-import static javax.servlet.http.HttpServletResponse.SC_OK;
+import static jakarta.servlet.http.HttpServletResponse.SC_INTERNAL_SERVER_ERROR;
+import static jakarta.servlet.http.HttpServletResponse.SC_OK;
 
 import com.google.api.services.dataflow.Dataflow;
 import com.google.api.services.dataflow.model.LaunchFlexTemplateParameter;
@@ -27,12 +27,13 @@ import com.google.common.collect.ImmutableMap;
 import com.google.common.flogger.FluentLogger;
 import com.google.common.net.MediaType;
 import google.registry.config.RegistryConfig.Config;
-import google.registry.config.RegistryEnvironment;
 import google.registry.request.Action;
+import google.registry.request.Action.GaeService;
 import google.registry.request.Parameter;
 import google.registry.request.Response;
 import google.registry.request.auth.Auth;
 import google.registry.util.Clock;
+import google.registry.util.RegistryEnvironment;
 import javax.inject.Inject;
 
 /**
@@ -53,9 +54,9 @@ import javax.inject.Inject;
  * <p>This runs the {@link google.registry.beam.resave.ResaveAllEppResourcesPipeline}.
  */
 @Action(
-    service = Action.Service.BACKEND,
+    service = GaeService.BACKEND,
     path = ResaveAllEppResourcesPipelineAction.PATH,
-    auth = Auth.AUTH_API_ADMIN)
+    auth = Auth.AUTH_ADMIN)
 public class ResaveAllEppResourcesPipelineAction implements Runnable {
 
   private static final FluentLogger logger = FluentLogger.forEnclosingClass();

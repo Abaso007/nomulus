@@ -15,8 +15,8 @@
 package google.registry.xml;
 
 import com.google.common.base.CharMatcher;
+import jakarta.xml.bind.annotation.adapters.XmlAdapter;
 import javax.annotation.Nullable;
-import javax.xml.bind.annotation.adapters.XmlAdapter;
 
 /**
  * {@link XmlAdapter} which trims all whitespace surrounding a String.
@@ -25,9 +25,9 @@ import javax.xml.bind.annotation.adapters.XmlAdapter;
  * values can commonly be formatted like so:
  *
  * <pre>{@code
- *   &lt;ns:tag&gt;
- *     XML value here.
- *   &lt;/ns:tag&gt;
+ * <ns:tag>
+ *   XML value here.
+ * </ns:tag>
  * }</pre>
  */
 public class TrimWhitespaceAdapter extends XmlAdapter<String, String> {

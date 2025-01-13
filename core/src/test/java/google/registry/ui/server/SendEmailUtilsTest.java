@@ -24,9 +24,9 @@ import static org.mockito.Mockito.verify;
 import com.google.common.collect.ImmutableList;
 import google.registry.groups.GmailClient;
 import google.registry.util.EmailMessage;
+import jakarta.mail.MessagingException;
+import jakarta.mail.internet.InternetAddress;
 import java.util.Optional;
-import javax.mail.MessagingException;
-import javax.mail.internet.InternetAddress;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 
@@ -39,8 +39,6 @@ class SendEmailUtilsTest {
   private void setRecipients(ImmutableList<String> recipients) throws Exception {
     sendEmailUtils =
         new SendEmailUtils(
-            new InternetAddress("outgoing@registry.example"),
-            "outgoing display name",
             recipients,
             gmailClient);
   }
@@ -141,7 +139,6 @@ class SendEmailUtilsTest {
         EmailMessage.newBuilder()
             .setSubject("Welcome to the Internet")
             .setBody("It is a dark and scary place.")
-            .setFrom(new InternetAddress("outgoing@registry.example"))
             .addBcc(new InternetAddress("bar@example.com"))
             .setRecipients(recipientBuilder.build())
             .build();
@@ -186,7 +183,6 @@ class SendEmailUtilsTest {
         EmailMessage.newBuilder()
             .setSubject("Welcome to the Internet")
             .setBody("It is a dark and scary place.")
-            .setFrom(new InternetAddress("outgoing@registry.example"))
             .setRecipients(recipientBuilder.build())
             .build();
     assertThat(emailMessage).isEqualTo(expectedContent);

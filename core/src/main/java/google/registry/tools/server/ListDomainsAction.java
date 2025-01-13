@@ -28,6 +28,7 @@ import com.google.common.collect.ImmutableSet;
 import google.registry.model.EppResourceUtils;
 import google.registry.model.domain.Domain;
 import google.registry.request.Action;
+import google.registry.request.Action.GaeService;
 import google.registry.request.Parameter;
 import google.registry.request.auth.Auth;
 import google.registry.util.Clock;
@@ -36,10 +37,10 @@ import javax.inject.Inject;
 
 /** An action that lists domains, for use by the {@code nomulus list_domains} command. */
 @Action(
-    service = Action.Service.TOOLS,
+    service = GaeService.TOOLS,
     path = ListDomainsAction.PATH,
     method = {GET, POST},
-    auth = Auth.AUTH_API_ADMIN)
+    auth = Auth.AUTH_ADMIN)
 public final class ListDomainsAction extends ListObjectsAction<Domain> {
 
   /** An App Engine limitation on how many subqueries can be used in a single query. */

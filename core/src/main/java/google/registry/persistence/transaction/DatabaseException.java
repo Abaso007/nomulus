@@ -14,12 +14,12 @@
 
 package google.registry.persistence.transaction;
 
-import autovalue.shaded.com.google.common.collect.ImmutableList;
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Joiner;
+import com.google.common.collect.ImmutableList;
+import jakarta.persistence.PersistenceException;
 import java.sql.SQLException;
 import java.util.Optional;
-import javax.persistence.PersistenceException;
 
 /**
  * Wraps an exception thrown by the JPA framework and captures the SQL error details (state and
@@ -39,7 +39,7 @@ import javax.persistence.PersistenceException;
  * <p>See the {@code logging.properties} files in the {@code env} package for the specific Hibernate
  * classes that have logging suppressed.
  */
-class DatabaseException extends PersistenceException {
+public class DatabaseException extends PersistenceException {
 
   private transient String cachedMessage;
 
@@ -62,7 +62,7 @@ class DatabaseException extends PersistenceException {
    * <p>If the {@code original Throwable} has at least one {@link SQLException} in its chain of
    * causes, a {@link DatabaseException} is thrown; otherwise this does nothing.
    */
-  static void tryWrapAndThrow(Throwable original) {
+  static void throwIfSqlException(Throwable original) {
     Throwable t = original;
     do {
       if (t instanceof SQLException) {
@@ -78,8 +78,7 @@ class DatabaseException extends PersistenceException {
   static String getSqlError(Throwable t) {
     ImmutableList.Builder<String> errMessageBuilder = new ImmutableList.Builder<>();
     do {
-      if (t instanceof SQLException) {
-        SQLException e = (SQLException) t;
+      if (t instanceof SQLException e) {
         getSqlExceptionDetails(e).ifPresent(errMessageBuilder::add);
       }
       t = t.getCause();

@@ -1,4 +1,4 @@
-// Copyright 2023 The Nomulus Authors. All Rights Reserved.
+// Copyright 2024 The Nomulus Authors. All Rights Reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -30,7 +30,7 @@ export interface GlobalLoader {
   providedIn: 'root',
 })
 export class GlobalLoaderService {
-  private static readonly TIMEOUT_MS = 3000;
+  private static readonly TIMEOUT_MS = 10000;
   private loaders = new Map<GlobalLoader, Subscription>();
   public isLoading: boolean = false;
 

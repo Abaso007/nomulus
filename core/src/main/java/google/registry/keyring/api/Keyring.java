@@ -145,11 +145,14 @@ public interface Keyring extends AutoCloseable {
    */
   String getMarksdbSmdrlLoginAndPassword();
 
-  /**
-   * Returns the credentials for a service account on the Google AppEngine project downloaded from
-   * the Cloud Console dashboard in JSON format.
-   */
-  String getJsonCredential();
+  /** Returns the API_KEY for authentication with the BSA portal. */
+  String getBsaApiKey();
+
+  /** Returns the Cloud SQL connection name of the primary database instance. */
+  String getSqlPrimaryConnectionName();
+
+  /** Returns the Cloud SQL connection name of the replica database instance. */
+  String getSqlReplicaConnectionName();
 
   // Don't throw so try-with-resources works better.
   @Override

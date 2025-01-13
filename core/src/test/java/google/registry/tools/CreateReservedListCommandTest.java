@@ -15,7 +15,6 @@
 package google.registry.tools;
 
 import static com.google.common.truth.Truth.assertThat;
-import static com.google.common.truth.Truth8.assertThat;
 import static google.registry.model.tld.label.ReservationType.FULLY_BLOCKED;
 import static google.registry.testing.DatabaseHelper.createTlds;
 import static google.registry.testing.DatabaseHelper.persistReservedList;
@@ -54,27 +53,6 @@ class CreateReservedListCommandTest
   void testSuccess_unspecifiedNameDefaultsToFileName() throws Exception {
     runCommandForced("--input=" + reservedTermsPath);
     assertThat(ReservedList.get("xn--q9jyb4c_common-reserved")).isPresent();
-  }
-
-  @Test
-  void testSuccess_shouldPublishDefaultsToTrue() throws Exception {
-    runCommandForced("--input=" + reservedTermsPath);
-    assertThat(ReservedList.get("xn--q9jyb4c_common-reserved")).isPresent();
-    assertThat(ReservedList.get("xn--q9jyb4c_common-reserved").get().getShouldPublish()).isTrue();
-  }
-
-  @Test
-  void testSuccess_shouldPublishSetToTrue_works() throws Exception {
-    runCommandForced("--input=" + reservedTermsPath, "--should_publish=true");
-    assertThat(ReservedList.get("xn--q9jyb4c_common-reserved")).isPresent();
-    assertThat(ReservedList.get("xn--q9jyb4c_common-reserved").get().getShouldPublish()).isTrue();
-  }
-
-  @Test
-  void testSuccess_shouldPublishSetToFalse_works() throws Exception {
-    runCommandForced("--input=" + reservedTermsPath, "--should_publish=false");
-    assertThat(ReservedList.get("xn--q9jyb4c_common-reserved")).isPresent();
-    assertThat(ReservedList.get("xn--q9jyb4c_common-reserved").get().getShouldPublish()).isFalse();
   }
 
   @Test

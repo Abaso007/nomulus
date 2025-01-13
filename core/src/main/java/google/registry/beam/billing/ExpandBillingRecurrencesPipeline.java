@@ -36,6 +36,7 @@ import google.registry.config.RegistryConfig.ConfigModule;
 import google.registry.flows.custom.CustomLogicFactoryModule;
 import google.registry.flows.custom.CustomLogicModule;
 import google.registry.flows.domain.DomainPricingLogic;
+import google.registry.flows.domain.DomainPricingLogic.AllocationTokenInvalidForCurrencyException;
 import google.registry.flows.domain.DomainPricingLogic.AllocationTokenInvalidForPremiumNameException;
 import google.registry.model.ImmutableObject;
 import google.registry.model.billing.BillingBase.Flag;
@@ -53,7 +54,6 @@ import google.registry.persistence.PersistenceModule.TransactionIsolationLevel;
 import google.registry.util.Clock;
 import google.registry.util.SystemClock;
 import java.io.Serializable;
-import java.math.BigInteger;
 import java.util.Optional;
 import java.util.Set;
 import javax.inject.Singleton;
@@ -202,7 +202,7 @@ public class ExpandBillingRecurrencesPipeline implements Serializable {
                     "oneYearAgo",
                     endTime.minusYears(1)),
                 true,
-                (BigInteger id) -> {
+                (Long id) -> {
                   recurrencesInScopeCounter.inc();
                   // Note that because all elements are mapped to the same dummy key, the next
                   // batching transform will effectively be serial. This however does not matter for
@@ -415,7 +415,8 @@ public class ExpandBillingRecurrencesPipeline implements Serializable {
                 .setCancellationMatchingBillingEvent(billingRecurrence)
                 .setTargetId(billingRecurrence.getTargetId())
                 .build();
-      } catch (AllocationTokenInvalidForPremiumNameException e) {
+      } catch (AllocationTokenInvalidForCurrencyException
+          | AllocationTokenInvalidForPremiumNameException e) {
         // This should not be reached since we are not using an allocation token
         return;
       }

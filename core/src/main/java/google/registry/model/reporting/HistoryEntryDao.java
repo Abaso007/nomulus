@@ -33,11 +33,11 @@ import google.registry.model.host.Host;
 import google.registry.model.host.HostHistory;
 import google.registry.persistence.VKey;
 import google.registry.persistence.transaction.CriteriaQueryBuilder;
+import jakarta.persistence.criteria.CriteriaBuilder;
+import jakarta.persistence.criteria.CriteriaQuery;
 import java.util.Comparator;
 import java.util.List;
 import java.util.stream.Stream;
-import javax.persistence.criteria.CriteriaBuilder;
-import javax.persistence.criteria.CriteriaQuery;
 import org.joda.time.DateTime;
 
 /** Retrieves {@link HistoryEntry} descendants (e.g. {@link DomainHistory}). */
@@ -118,7 +118,7 @@ public class HistoryEntryDao {
   /** Loads all history objects from all time from the given registrars. */
   public static Iterable<HistoryEntry> loadHistoryObjectsByRegistrars(
       ImmutableCollection<String> registrarIds) {
-    return tm().transact(
+    return tm().reTransact(
             () ->
                 Streams.concat(
                         loadHistoryObjectByRegistrarsInternal(ContactHistory.class, registrarIds),

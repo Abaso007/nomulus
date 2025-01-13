@@ -23,10 +23,10 @@ import com.google.common.collect.Streams;
 import google.registry.beam.common.RegistryQuery.CriteriaQuerySupplier;
 import google.registry.persistence.transaction.JpaTransactionManager;
 import google.registry.persistence.transaction.TransactionManagerFactory;
+import jakarta.persistence.criteria.CriteriaQuery;
 import java.util.Map;
 import java.util.Objects;
 import javax.annotation.Nullable;
-import javax.persistence.criteria.CriteriaQuery;
 import org.apache.beam.sdk.coders.Coder;
 import org.apache.beam.sdk.metrics.Counter;
 import org.apache.beam.sdk.metrics.Metrics;
@@ -209,9 +209,16 @@ public final class RegistryJpaIO {
 
       @ProcessElement
       public void processElement(OutputReceiver<T> outputReceiver) {
+        // Note the use of no-retry transaction here. The results from the query are streamed to the
+        // output receiver inside the transaction, which cannot be rolled back in case of a retry,
+        // which in turn results in duplicate elements. If we try to pass the results to the output
+        // receiver outside the transaction, they have to be materialized into a list containing all
+        // the elements (without resorting to manual pagination) and greatly decrease the
+        // parallelism of the pipeline.
         tm().transactNoRetry(
                 () -> {
                   query.stream().map(resultMapper::apply).forEach(outputReceiver::output);
+                  return null;
                 });
       }
     }

@@ -172,6 +172,7 @@ public final class PosixTarHeader {
   }
 
   /** Returns the modified time as a UTC {@link DateTime} object. */
+  @SuppressWarnings("JodaDateTimeConstants")
   public DateTime getMtime() {
     return new DateTime(Long.parseLong(extractField(136, 12).trim(), 8) * MILLIS_PER_SECOND, UTC);
   }
@@ -183,15 +184,11 @@ public final class PosixTarHeader {
 
   /** Returns the {@link Type} of file. */
   public Type getType() {
-    switch (header[156]) {
-      case '\0':
-      case '0':
-        return Type.REGULAR;
-      case '5':
-        return Type.DIRECTORY;
-      default:
-        return Type.UNSUPPORTED;
-    }
+    return switch (header[156]) {
+      case '\0', '0' -> Type.REGULAR;
+      case '5' -> Type.DIRECTORY;
+      default -> Type.UNSUPPORTED;
+    };
   }
 
   /**
@@ -332,7 +329,7 @@ public final class PosixTarHeader {
       setMode(DEFAULT_MODE);
       setUid(DEFAULT_UID);
       setGid(DEFAULT_GID);
-      setMtime(new DateTime(UTC));
+      setMtime(DateTime.now(UTC));
       setType(DEFAULT_TYPE);
       setMagic();
       setVersion();
@@ -417,6 +414,7 @@ public final class PosixTarHeader {
      * epoch in UTC time. Because {@link DateTime} has millisecond precision, it gets rounded down
      * (floor) to the second.
      */
+    @SuppressWarnings("JodaDateTimeConstants")
     public Builder setMtime(DateTime mtime) {
       checkNotNull(mtime, "mtime");
       setField("mtime", 136, 12, String.format("%011o", mtime.getMillis() / MILLIS_PER_SECOND));
@@ -432,14 +430,9 @@ public final class PosixTarHeader {
      */
     public Builder setType(Type type) {
       switch (type) {
-        case REGULAR:
-          header[156] = '0';
-          break;
-        case DIRECTORY:
-          header[156] = '5';
-          break;
-        default:
-          throw new UnsupportedOperationException();
+        case REGULAR -> header[156] = '0';
+        case DIRECTORY -> header[156] = '5';
+        default -> throw new UnsupportedOperationException();
       }
       return this;
     }

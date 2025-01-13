@@ -43,6 +43,7 @@ import google.registry.persistence.transaction.CriteriaQueryBuilder;
 import google.registry.persistence.transaction.JpaTestExtensions;
 import google.registry.persistence.transaction.JpaTestExtensions.JpaIntegrationTestExtension;
 import google.registry.testing.FakeClock;
+import java.util.Optional;
 import org.apache.beam.sdk.coders.StringUtf8Coder;
 import org.apache.beam.sdk.testing.PAssert;
 import org.apache.beam.sdk.values.PCollection;
@@ -105,7 +106,7 @@ public class RegistryJpaReadTest {
         RegistryJpaIO.read(
                 "select d, r.emailAddress from Domain d join Registrar r on"
                     + " d.currentSponsorRegistrarId = r.registrarId where r.type = :type"
-                    + " and d.deletionTime > now()",
+                    + " and d.deletionTime > CAST(now() AS timestamp)",
                 ImmutableMap.of("type", Registrar.Type.REAL),
                 false,
                 (Object[] row) -> {
@@ -149,7 +150,7 @@ public class RegistryJpaReadTest {
         RegistryJpaIO.read(
                 "select d from Domain d join Registrar r on"
                     + " d.currentSponsorRegistrarId = r.registrarId where r.type = :type"
-                    + " and d.deletionTime > now()",
+                    + " and d.deletionTime > CAST(now() AS timestamp)",
                 ImmutableMap.of("type", Registrar.Type.REAL),
                 Domain.class,
                 Domain::getRepoId)
@@ -191,7 +192,7 @@ public class RegistryJpaReadTest {
                     StatusValue.SERVER_UPDATE_PROHIBITED,
                     StatusValue.SERVER_RENEW_PROHIBITED,
                     StatusValue.SERVER_HOLD))
-            .setRegistrant(contact.createVKey())
+            .setRegistrant(Optional.of(contact.createVKey()))
             .setContacts(ImmutableSet.of())
             .setSubordinateHosts(ImmutableSet.of("ns1.example.com"))
             .setPersistedCurrentSponsorRegistrarId(registrar.getRegistrarId())

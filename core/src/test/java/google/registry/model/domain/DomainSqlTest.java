@@ -31,6 +31,7 @@ import static google.registry.util.DateTimeUtils.END_OF_TIME;
 import static google.registry.util.DateTimeUtils.START_OF_TIME;
 import static org.joda.time.DateTimeZone.UTC;
 
+import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.ImmutableSortedMap;
 import com.google.common.collect.Sets;
@@ -53,11 +54,13 @@ import google.registry.persistence.transaction.JpaTestExtensions.JpaIntegrationW
 import google.registry.testing.FakeClock;
 import google.registry.util.SerializeUtils;
 import java.util.Arrays;
+import java.util.Optional;
+import org.joda.money.CurrencyUnit;
+import org.joda.money.Money;
 import org.joda.time.DateTime;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.RegisterExtension;
-import org.testcontainers.shaded.com.google.common.collect.ImmutableList;
 
 /** Verify that we can store/retrieve Domain objects from a SQL database. */
 public class DomainSqlTest {
@@ -69,7 +72,7 @@ public class DomainSqlTest {
       new JpaTestExtensions.Builder().withClock(fakeClock).buildIntegrationWithCoverageExtension();
 
   private Domain domain;
-  private VKey<Contact> contactKey;
+  private Optional<VKey<Contact>> contactKey;
   private VKey<Contact> contact2Key;
   private VKey<Host> host1VKey;
   private Host host;
@@ -82,7 +85,7 @@ public class DomainSqlTest {
     saveRegistrar("registrar1");
     saveRegistrar("registrar2");
     saveRegistrar("registrar3");
-    contactKey = createKey(Contact.class, "contact_id1");
+    contactKey = Optional.of(createKey(Contact.class, "contact_id1"));
     contact2Key = createKey(Contact.class, "contact_id2");
 
     host1VKey = createKey(Host.class, "host1");
@@ -133,10 +136,12 @@ public class DomainSqlTest {
         new AllocationToken.Builder()
             .setToken("abc123Unlimited")
             .setTokenType(BULK_PRICING)
+            .setDiscountFraction(1.0)
             .setCreationTimeForTest(DateTime.parse("2010-11-12T05:00:00Z"))
             .setAllowedTlds(ImmutableSet.of("dev", "app"))
             .setAllowedRegistrarIds(ImmutableSet.of("TheRegistrar"))
             .setRenewalPriceBehavior(RenewalPriceBehavior.SPECIFIED)
+            .setRenewalPrice(Money.of(CurrencyUnit.USD, 0))
             .setAllowedEppActions(ImmutableSet.of(CommandName.CREATE))
             .setTokenStatusTransitions(
                 ImmutableSortedMap.<DateTime, TokenStatus>naturalOrder()
