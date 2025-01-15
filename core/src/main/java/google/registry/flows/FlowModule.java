@@ -15,6 +15,7 @@
 package google.registry.flows;
 
 import static com.google.common.base.Preconditions.checkState;
+import static google.registry.persistence.transaction.TransactionManagerFactory.replicaTm;
 import static google.registry.persistence.transaction.TransactionManagerFactory.tm;
 
 import com.google.common.base.Strings;
@@ -37,6 +38,7 @@ import google.registry.model.host.HostHistory;
 import google.registry.model.reporting.HistoryEntry;
 import google.registry.persistence.IsolationLevel;
 import google.registry.persistence.PersistenceModule.TransactionIsolationLevel;
+import google.registry.persistence.transaction.JpaTransactionManager;
 import java.lang.annotation.Documented;
 import java.util.Optional;
 import javax.inject.Qualifier;
@@ -193,6 +195,16 @@ public class FlowModule {
 
   @Provides
   @FlowScope
+  static JpaTransactionManager provideJpaTm(Class<? extends Flow> flowClass) {
+    if (MutatingFlow.class.isAssignableFrom(flowClass)) {
+      return tm();
+    } else {
+      return replicaTm();
+    }
+  }
+
+  @Provides
+  @FlowScope
   static ResourceCommand provideResourceCommand(EppInput eppInput) {
     return ((ResourceCommandWrapper) eppInput.getCommandWrapper().getCommand())
         .getResourceCommand();
@@ -314,7 +326,7 @@ public class FlowModule {
 
   @Provides
   static FlowMetadata provideFlowMetadata(@Superuser boolean isSuperuser) {
-    return FlowMetadata.newBuilder().setSuperuser(isSuperuser).build();
+    return FlowMetadata.newBuilder().setIsSuperuser(isSuperuser).build();
   }
 
   /** Wrapper class to carry an {@link EppException} to the calling code. */

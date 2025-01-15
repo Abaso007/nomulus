@@ -128,7 +128,7 @@ public class CloudDnsWriter extends BaseDnsWriter {
     // Return early if no DNS records should be published.
     // desiredRecordsBuilder is populated with an empty set to indicate that all existing records
     // should be deleted.
-    if (!domain.isPresent() || !domain.get().shouldPublishToDns()) {
+    if (domain.isEmpty() || !domain.get().shouldPublishToDns()) {
       desiredRecords.put(absoluteDomainName, ImmutableSet.of());
       return;
     }
@@ -192,7 +192,7 @@ public class CloudDnsWriter extends BaseDnsWriter {
     Optional<Host> host = loadByForeignKey(Host.class, hostName, clock.nowUtc());
 
     // Return early if the host is deleted.
-    if (!host.isPresent()) {
+    if (host.isEmpty()) {
       desiredRecords.put(absoluteHostName, ImmutableSet.of());
       return;
     }
@@ -247,7 +247,7 @@ public class CloudDnsWriter extends BaseDnsWriter {
     Optional<InternetDomainName> tld = Tlds.findTldForName(host);
 
     // Host not managed by our registry, no need to update DNS.
-    if (!tld.isPresent()) {
+    if (tld.isEmpty()) {
       logger.atSevere().log("publishHost called for invalid host '%s'.", hostName);
       return;
     }
@@ -363,8 +363,8 @@ public class CloudDnsWriter extends BaseDnsWriter {
    * <p>This call should be used in conjunction with {@link #getResourceRecordsForDomains} in a
    * get-and-set retry loop.
    *
-   * <p>See {@link "<a href="https://cloud.google.com/dns/troubleshooting">Troubleshoot Cloud
-   * DNS</a>"} for a list of errors produced by the Google Cloud DNS API.
+   * <p>See <a href="https://cloud.google.com/dns/troubleshooting">Troubleshoot Cloud DNS</a> for a
+   * list of errors produced by the Google Cloud DNS API.
    *
    * @throws ZoneStateException if the operation could not be completely successfully because the
    *     records to delete do not exist, already exist or have been modified with different
@@ -401,7 +401,7 @@ public class CloudDnsWriter extends BaseDnsWriter {
       if (err == null || err.getErrors().size() > 1) {
         throw e;
       }
-      String errorReason = err.getErrors().get(0).getReason();
+      String errorReason = err.getErrors().getFirst().getReason();
 
       if (RETRYABLE_EXCEPTION_REASONS.contains(errorReason)) {
         throw new ZoneStateException(errorReason);

@@ -35,6 +35,7 @@ import google.registry.testing.FakeResponse;
 import java.util.Optional;
 import java.util.Random;
 import org.joda.time.DateTime;
+import org.joda.time.Duration;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.RegisterExtension;
@@ -55,7 +56,12 @@ public class RefreshDnsForAllDomainsActionTest {
     createTld("bar");
     action =
         new RefreshDnsForAllDomainsAction(
-            response, ImmutableSet.of("bar"), Optional.of(10), new Random());
+            response,
+            ImmutableSet.of("bar"),
+            Optional.of(10),
+            Optional.empty(),
+            Optional.empty(),
+            new Random());
   }
 
   @Test
@@ -74,9 +80,14 @@ public class RefreshDnsForAllDomainsActionTest {
     // Set batch size to 1 since each batch will be enqueud at the same time
     action =
         new RefreshDnsForAllDomainsAction(
-            response, ImmutableSet.of("bar"), Optional.of(1), new Random());
-    tm().transact(() -> action.refreshBatch(Optional.empty(), 1000));
-    tm().transact(() -> action.refreshBatch(Optional.empty(), 1000));
+            response,
+            ImmutableSet.of("bar"),
+            Optional.of(1),
+            Optional.of(7),
+            Optional.empty(),
+            new Random());
+    tm().transact(() -> action.refreshBatch(Optional.empty(), Duration.standardMinutes(1000)));
+    tm().transact(() -> action.refreshBatch(Optional.empty(), Duration.standardMinutes(1000)));
     ImmutableList<DnsRefreshRequest> refreshRequests =
         tm().transact(
                 () ->
@@ -95,6 +106,28 @@ public class RefreshDnsForAllDomainsActionTest {
     action.run();
     assertDomainDnsRequestWithRequestTime("foo.bar", clock.nowUtc());
     assertNoDnsRequestsExcept("foo.bar");
+  }
+
+  @Test
+  void test_runAction_refreshesDeletedDomain_whenActiveOrDeletedSinceIsProvided() throws Exception {
+    action =
+        new RefreshDnsForAllDomainsAction(
+            response,
+            ImmutableSet.of("bar"),
+            Optional.of(1),
+            Optional.of(7),
+            Optional.of(clock.nowUtc().minusYears(3)),
+            new Random());
+    persistActiveDomain("foo.bar");
+    persistDeletedDomain("deleted1.bar", clock.nowUtc().minusYears(1));
+    persistDeletedDomain("deleted3.bar", clock.nowUtc().minusYears(3));
+    persistDeletedDomain("deleted5.bar", clock.nowUtc().minusYears(5));
+    action.run();
+    assertDomainDnsRequestWithRequestTime("foo.bar", clock.nowUtc());
+    assertDomainDnsRequestWithRequestTime("deleted1.bar", clock.nowUtc());
+    assertDomainDnsRequestWithRequestTime("deleted3.bar", clock.nowUtc());
+
+    assertNoDnsRequestsExcept("foo.bar", "deleted1.bar", "deleted3.bar");
   }
 
   @Test

@@ -33,8 +33,8 @@ import static google.registry.testing.DatabaseHelper.createTld;
 import static google.registry.testing.DatabaseHelper.persistActiveDomain;
 import static google.registry.testing.DatabaseHelper.persistActiveSubordinateHost;
 import static google.registry.testing.DatabaseHelper.persistResource;
-import static javax.servlet.http.HttpServletResponse.SC_ACCEPTED;
-import static javax.servlet.http.HttpServletResponse.SC_OK;
+import static jakarta.servlet.http.HttpServletResponse.SC_ACCEPTED;
+import static jakarta.servlet.http.HttpServletResponse.SC_OK;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.doThrow;
@@ -64,8 +64,8 @@ import google.registry.testing.FakeLockHandler;
 import google.registry.testing.FakeResponse;
 import google.registry.testing.Lazies;
 import google.registry.util.EmailMessage;
+import jakarta.mail.internet.InternetAddress;
 import java.util.Set;
-import javax.mail.internet.InternetAddress;
 import org.joda.time.DateTime;
 import org.joda.time.Duration;
 import org.junit.jupiter.api.BeforeEach;
@@ -87,7 +87,6 @@ public class PublishDnsUpdatesActionTest {
   private final DnsMetrics dnsMetrics = mock(DnsMetrics.class);
   private final CloudTasksHelper cloudTasksHelper = new CloudTasksHelper();
   private PublishDnsUpdatesAction action;
-  private InternetAddress outgoingRegistry;
   private Lazy<InternetAddress> registrySupportEmail;
   private Lazy<InternetAddress> registryCcEmail;
   private final GmailClient emailService = mock(GmailClient.class);
@@ -96,7 +95,6 @@ public class PublishDnsUpdatesActionTest {
   void beforeEach() throws Exception {
     createTld("xn--q9jyb4c");
     createTld("com");
-    outgoingRegistry = new InternetAddress("outgoing@registry.example");
     registrySupportEmail = Lazies.of(new InternetAddress("registry@test.com"));
     registryCcEmail = Lazies.of(new InternetAddress("registry-cc@test.com"));
     persistResource(
@@ -159,7 +157,6 @@ public class PublishDnsUpdatesActionTest {
         "awesomeRegistry",
         registrySupportEmail,
         registryCcEmail,
-        outgoingRegistry,
         retryCount,
         new DnsWriterProxy(ImmutableMap.of("correctWriter", dnsWriter)),
         dnsMetrics,

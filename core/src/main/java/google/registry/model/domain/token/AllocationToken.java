@@ -22,6 +22,7 @@ import static google.registry.model.domain.token.AllocationToken.TokenStatus.CAN
 import static google.registry.model.domain.token.AllocationToken.TokenStatus.ENDED;
 import static google.registry.model.domain.token.AllocationToken.TokenStatus.NOT_STARTED;
 import static google.registry.model.domain.token.AllocationToken.TokenStatus.VALID;
+import static google.registry.model.domain.token.AllocationToken.TokenType.REGISTER_BSA;
 import static google.registry.persistence.transaction.TransactionManagerFactory.tm;
 import static google.registry.util.CollectionUtils.forceEmptyToNull;
 import static google.registry.util.CollectionUtils.nullToEmptyImmutableCopy;
@@ -49,19 +50,22 @@ import google.registry.model.domain.fee.FeeQueryCommandExtensionItem.CommandName
 import google.registry.model.reporting.HistoryEntry.HistoryEntryId;
 import google.registry.persistence.VKey;
 import google.registry.persistence.WithVKey;
+import google.registry.persistence.converter.AllocationTokenStatusTransitionUserType;
+import jakarta.persistence.AttributeOverride;
+import jakarta.persistence.AttributeOverrides;
+import jakarta.persistence.Column;
+import jakarta.persistence.Entity;
+import jakarta.persistence.EnumType;
+import jakarta.persistence.Enumerated;
+import jakarta.persistence.Id;
+import jakarta.persistence.Index;
+import jakarta.persistence.Table;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import javax.annotation.Nullable;
-import javax.persistence.AttributeOverride;
-import javax.persistence.AttributeOverrides;
-import javax.persistence.Column;
-import javax.persistence.Entity;
-import javax.persistence.EnumType;
-import javax.persistence.Enumerated;
-import javax.persistence.Id;
-import javax.persistence.Index;
-import javax.persistence.Table;
+import org.hibernate.annotations.Type;
+import org.joda.money.Money;
 import org.joda.time.DateTime;
 
 /** An entity representing an allocation token. */
@@ -77,10 +81,10 @@ import org.joda.time.DateTime;
 public class AllocationToken extends UpdateAutoTimestampEntity implements Buildable {
 
   private static final long serialVersionUID = -3954475393220876903L;
-  private static final String REMOVE_DOMAIN = "__REMOVEDOMAIN__";
+  private static final String REMOVE_BULK_PRICING = "__REMOVE_BULK_PRICING__";
 
   private static final ImmutableMap<String, TokenBehavior> STATIC_TOKEN_BEHAVIORS =
-      ImmutableMap.of(REMOVE_DOMAIN, TokenBehavior.REMOVE_DOMAIN);
+      ImmutableMap.of(REMOVE_BULK_PRICING, TokenBehavior.REMOVE_BULK_PRICING);
 
   // Promotions should only move forward, and ENDED / CANCELLED are terminal states.
   private static final ImmutableMultimap<TokenStatus, TokenStatus> VALID_TOKEN_STATUS_TRANSITIONS =
@@ -91,10 +95,10 @@ public class AllocationToken extends UpdateAutoTimestampEntity implements Builda
 
   private static final ImmutableMap<String, AllocationToken> BEHAVIORAL_TOKENS =
       ImmutableMap.of(
-          REMOVE_DOMAIN,
+          REMOVE_BULK_PRICING,
           new AllocationToken.Builder()
               .setTokenType(TokenType.UNLIMITED_USE)
-              .setToken(REMOVE_DOMAIN)
+              .setToken(REMOVE_BULK_PRICING)
               .build());
 
   public static Optional<AllocationToken> maybeGetStaticTokenInstance(String name) {
@@ -114,24 +118,53 @@ public class AllocationToken extends UpdateAutoTimestampEntity implements Builda
      */
     BYPASS_TLD_STATE,
     /** Bypasses most checks and creates the domain as an anchor tenant, with all that implies. */
-    ANCHOR_TENANT
+    ANCHOR_TENANT,
+    /**
+     * Bypasses the premium list to use the standard creation price. Does not affect the renewal
+     * price.
+     *
+     * <p>This cannot be specified along with a discount fraction/price, and any renewals (automatic
+     * or otherwise) will use the premium price for the domain if one exists.
+     *
+     * <p>Tokens with this behavior must be tied to a single particular domain.
+     */
+    NONPREMIUM_CREATE
   }
 
   /** Type of the token that indicates how and where it should be used. */
   public enum TokenType {
     /** Token used for bulk pricing */
-    BULK_PRICING,
+    BULK_PRICING(/* isOneTimeUse= */ false),
     /** Token saved on a TLD to use if no other token is passed from the client */
-    DEFAULT_PROMO,
+    DEFAULT_PROMO(/* isOneTimeUse= */ false),
     /** This is the old name for what is now BULK_PRICING. */
-    // TODO(sarahbot@): Remove this type once all tokens of this type have been scrubbed from the
+    // TODO(b/261763205): Remove this type once all tokens of this type have been scrubbed from the
     // database
     @Deprecated
-    PACKAGE,
+    PACKAGE(/* isOneTimeUse= */ false),
     /** Invalid after use */
-    SINGLE_USE,
+    SINGLE_USE(/* isOneTimeUse= */ true),
     /** Do not expire after use */
-    UNLIMITED_USE,
+    UNLIMITED_USE(/* isOneTimeUse= */ false),
+    /**
+     * Allows bypassing the BSA check during domain creation, otherwise has the same semantics as
+     * {@link #SINGLE_USE}.
+     *
+     * <p>This token applies to a single domain only. If the domain is not blocked by BSA at the
+     * redemption time this token is processed like {@code SINGLE_USE}, as mentioned above.
+     */
+    REGISTER_BSA(/* isOneTimeUse= */ true);
+
+    private final boolean isOneTimeUse;
+
+    private TokenType(boolean isOneTimeUse) {
+      this.isOneTimeUse = isOneTimeUse;
+    }
+
+    /** Returns true if token should be invalidated after use. */
+    public boolean isOneTimeUse() {
+      return this.isOneTimeUse;
+    }
   }
 
   /**
@@ -142,10 +175,10 @@ public class AllocationToken extends UpdateAutoTimestampEntity implements Builda
     /** No special behavior */
     DEFAULT,
     /**
-     * REMOVE_DOMAIN triggers domain removal from a bulk pricing package, bypasses DEFAULT token
-     * validations.
+     * REMOVE_BULK_PRICING triggers domain removal from a bulk pricing package, bypasses DEFAULT
+     * token validations.
      */
-    REMOVE_DOMAIN
+    REMOVE_BULK_PRICING
   }
 
   /** The status of this token with regard to any potential promotion. */
@@ -206,6 +239,31 @@ public class AllocationToken extends UpdateAutoTimestampEntity implements Builda
   @Column(name = "renewalPriceBehavior", nullable = false)
   RenewalPriceBehavior renewalPriceBehavior = RenewalPriceBehavior.DEFAULT;
 
+  /** The price used for renewals iff the renewalPriceBehavior is SPECIFIED. */
+  @Nullable
+  @AttributeOverride(
+      name = "amount",
+      // Override Hibernate default (numeric(38,2)) to match real schema definition (numeric(19,2)).
+      column = @Column(name = "renewalPriceAmount", precision = 19, scale = 2))
+  @AttributeOverride(name = "currency", column = @Column(name = "renewalPriceCurrency"))
+  Money renewalPrice;
+
+  /**
+   * A discount that allows the setting of promotional prices. This field is different from {@code
+   * discountFraction} because the price set here is treated as the domain price, versus {@code
+   * discountFraction} that applies a fraction discount to the domain base price.
+   *
+   * <p>Prefer this method of discount when attempting to set a promotional price across TLDs with
+   * different base prices.
+   */
+  @Nullable
+  @AttributeOverride(
+      name = "amount",
+      // Override Hibernate default (numeric(38,2)) to match real schema definition (numeric(19,2)).
+      column = @Column(name = "discountPriceAmount", precision = 19, scale = 2))
+  @AttributeOverride(name = "currency", column = @Column(name = "discountPriceCurrency"))
+  Money discountPrice;
+
   @Enumerated(EnumType.STRING)
   @Column(nullable = false)
   RegistrationBehavior registrationBehavior = RegistrationBehavior.DEFAULT;
@@ -216,11 +274,14 @@ public class AllocationToken extends UpdateAutoTimestampEntity implements Builda
    * <p>If the token is promotional, the status will be VALID at the start of the promotion and
    * ENDED at the end. If manually cancelled, we will add a CANCELLED status.
    */
+  @Type(AllocationTokenStatusTransitionUserType.class)
   TimedTransitionProperty<TokenStatus> tokenStatusTransitions =
       TimedTransitionProperty.withInitialValue(NOT_STARTED);
 
   /** Allowed EPP actions for this token, or null if all actions are allowed. */
-  @Nullable Set<CommandName> allowedEppActions;
+  @Nullable
+  @Enumerated(EnumType.STRING)
+  Set<CommandName> allowedEppActions;
 
   public String getToken() {
     return token;
@@ -254,6 +315,10 @@ public class AllocationToken extends UpdateAutoTimestampEntity implements Builda
     return discountFraction;
   }
 
+  public Optional<Money> getDiscountPrice() {
+    return Optional.ofNullable(discountPrice);
+  }
+
   public boolean shouldDiscountPremiums() {
     return discountPremiums;
   }
@@ -280,6 +345,10 @@ public class AllocationToken extends UpdateAutoTimestampEntity implements Builda
     return renewalPriceBehavior;
   }
 
+  public Optional<Money> getRenewalPrice() {
+    return Optional.ofNullable(renewalPrice);
+  }
+
   public RegistrationBehavior getRegistrationBehavior() {
     return registrationBehavior;
   }
@@ -302,19 +371,18 @@ public class AllocationToken extends UpdateAutoTimestampEntity implements Builda
       ALLOCATION_TOKENS_CACHE =
           CacheUtils.newCacheBuilder(getSingletonCacheRefreshDuration())
               .build(
-                  new CacheLoader<VKey<AllocationToken>, Optional<AllocationToken>>() {
+                  new CacheLoader<>() {
                     @Override
                     public Optional<AllocationToken> load(VKey<AllocationToken> key) {
-                      return tm().transact(() -> tm().loadByKeyIfPresent(key));
+                      return tm().reTransact(() -> tm().loadByKeyIfPresent(key));
                     }
 
                     @Override
-                    public Map<VKey<AllocationToken>, Optional<AllocationToken>> loadAll(
-                        Iterable<? extends VKey<AllocationToken>> keys) {
-                      ImmutableSet<VKey<AllocationToken>> keySet = ImmutableSet.copyOf(keys);
-                      return tm().transact(
+                    public Map<? extends VKey<AllocationToken>, ? extends Optional<AllocationToken>>
+                        loadAll(Set<? extends VKey<AllocationToken>> keys) {
+                      return tm().reTransact(
                               () ->
-                                  keySet.stream()
+                                  keys.stream()
                                       .collect(
                                           toImmutableMap(
                                               key -> key, key -> tm().loadByKeyIfPresent(key))));
@@ -349,39 +417,71 @@ public class AllocationToken extends UpdateAutoTimestampEntity implements Builda
       checkArgumentNotNull(getInstance().tokenType, "Token type must be specified");
       checkArgument(!Strings.isNullOrEmpty(getInstance().token), "Token must not be null or empty");
       checkArgument(
-          !getInstance().tokenType.equals(TokenType.BULK_PRICING)
-              || getInstance().renewalPriceBehavior.equals(RenewalPriceBehavior.SPECIFIED),
-          "Bulk tokens must have renewalPriceBehavior set to SPECIFIED");
+          getInstance().domainName == null || getInstance().tokenType.isOneTimeUse(),
+          "Domain name can only be specified for SINGLE_USE or REGISTER_BSA tokens");
       checkArgument(
-          !getInstance().tokenType.equals(TokenType.BULK_PRICING)
-              || ImmutableSet.of(CommandName.CREATE).equals(getInstance().allowedEppActions),
-          "Bulk tokens may only be valid for CREATE actions");
-      checkArgument(
-          !getInstance().tokenType.equals(TokenType.BULK_PRICING)
-              || !getInstance().discountPremiums,
-          "Bulk tokens cannot discount premium names");
-      checkArgument(
-          getInstance().domainName == null || TokenType.SINGLE_USE.equals(getInstance().tokenType),
-          "Domain name can only be specified for SINGLE_USE tokens");
-      checkArgument(
-          getInstance().redemptionHistoryId == null
-              || TokenType.SINGLE_USE.equals(getInstance().tokenType),
-          "Redemption history entry can only be specified for SINGLE_USE tokens");
-      checkArgument(
-          getInstance().tokenType != TokenType.BULK_PRICING
-              || (getInstance().allowedClientIds != null
-                  && getInstance().allowedClientIds.size() == 1),
-          "BULK_PRICING tokens must have exactly one allowed client registrar");
+          getInstance().redemptionHistoryId == null || getInstance().tokenType.isOneTimeUse(),
+          "Redemption history entry can only be specified for SINGLE_USE or REGISTER_BSA tokens");
       checkArgument(
           getInstance().discountFraction > 0 || !getInstance().discountPremiums,
           "Discount premiums can only be specified along with a discount fraction");
       checkArgument(
-          getInstance().discountFraction > 0 || getInstance().discountYears == 1,
-          "Discount years can only be specified along with a discount fraction");
+          getInstance().discountFraction > 0
+              || getInstance().discountPrice != null
+              || getInstance().discountYears == 1,
+          "Discount years can only be specified along with a discount fraction/price");
+      if (getInstance().getTokenType().equals(REGISTER_BSA)) {
+        checkArgumentNotNull(
+            getInstance().domainName, "REGISTER_BSA tokens must be tied to a domain");
+      }
       if (getInstance().registrationBehavior.equals(RegistrationBehavior.ANCHOR_TENANT)) {
         checkArgumentNotNull(
             getInstance().domainName, "ANCHOR_TENANT tokens must be tied to a domain");
       }
+      if (getInstance().registrationBehavior.equals(RegistrationBehavior.NONPREMIUM_CREATE)) {
+        checkArgument(
+            getInstance().discountFraction == 0.0 && getInstance().discountPrice == null,
+            "NONPREMIUM_CREATE tokens cannot apply a discount");
+        checkArgumentNotNull(
+            getInstance().domainName, "NONPREMIUM_CREATE tokens must be tied to a domain");
+        checkArgument(
+            getInstance().allowedEppActions == null
+                || getInstance().allowedEppActions.contains(CommandName.CREATE),
+            "NONPREMIUM_CREATE tokens must allow for CREATE actions");
+      }
+
+      checkArgument(
+          getInstance().renewalPriceBehavior.equals(RenewalPriceBehavior.SPECIFIED)
+              == (getInstance().renewalPrice != null),
+          "renewalPrice must be specified iff renewalPriceBehavior is SPECIFIED");
+
+      if (getInstance().tokenType.equals(TokenType.BULK_PRICING)) {
+        checkArgument(
+            getInstance().discountFraction == 1.0,
+            "BULK_PRICING tokens must have a discountFraction of 1.0");
+        checkArgument(
+            !getInstance().shouldDiscountPremiums(),
+            "BULK_PRICING tokens cannot discount premium names");
+        checkArgument(
+            getInstance().renewalPriceBehavior.equals(RenewalPriceBehavior.SPECIFIED),
+            "BULK_PRICING tokens must have renewalPriceBehavior set to SPECIFIED");
+        checkArgument(
+            getInstance().renewalPrice.getAmount().intValue() == 0,
+            "BULK_PRICING tokens must have a renewal price of 0");
+        checkArgument(
+            ImmutableSet.of(CommandName.CREATE).equals(getInstance().allowedEppActions),
+            "BULK_PRICING tokens may only be valid for CREATE actions");
+        checkArgument(
+            getInstance().allowedClientIds != null && getInstance().allowedClientIds.size() == 1,
+            "BULK_PRICING tokens must have exactly one allowed client registrar");
+      }
+
+      if (getInstance().discountFraction != 0.0) {
+        checkArgument(
+            getInstance().discountPrice == null,
+            "discountFraction and discountPrice can't be set together");
+      }
+
       if (getInstance().domainName != null) {
         try {
           DomainFlowUtils.validateDomainName(getInstance().domainName);
@@ -478,8 +578,18 @@ public class AllocationToken extends UpdateAutoTimestampEntity implements Builda
       return this;
     }
 
+    public Builder setRenewalPrice(Money renewalPrice) {
+      getInstance().renewalPrice = renewalPrice;
+      return this;
+    }
+
     public Builder setRegistrationBehavior(RegistrationBehavior registrationBehavior) {
       getInstance().registrationBehavior = registrationBehavior;
+      return this;
+    }
+
+    public Builder setDiscountPrice(@Nullable Money discountPrice) {
+      getInstance().discountPrice = discountPrice;
       return this;
     }
   }

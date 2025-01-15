@@ -21,27 +21,21 @@ import static google.registry.request.auth.AuthSettings.AuthLevel.USER;
 import static google.registry.request.auth.AuthSettings.UserPolicy.ADMIN;
 
 import com.google.common.collect.ImmutableList;
-import com.google.common.collect.Ordering;
 import com.google.common.flogger.FluentLogger;
-import google.registry.request.auth.AuthSettings.AuthMethod;
+import jakarta.servlet.http.HttpServletRequest;
 import java.util.Optional;
 import javax.inject.Inject;
-import javax.servlet.http.HttpServletRequest;
 
 /** Top-level authentication/authorization class; calls authentication mechanisms as needed. */
 public class RequestAuthenticator {
 
   private final ImmutableList<AuthenticationMechanism> apiAuthenticationMechanisms;
-  private final LegacyAuthenticationMechanism legacyAuthenticationMechanism;
 
   private static final FluentLogger logger = FluentLogger.forEnclosingClass();
 
   @Inject
-  public RequestAuthenticator(
-      ImmutableList<AuthenticationMechanism> apiAuthenticationMechanisms,
-      LegacyAuthenticationMechanism legacyAuthenticationMechanism) {
+  public RequestAuthenticator(ImmutableList<AuthenticationMechanism> apiAuthenticationMechanisms) {
     this.apiAuthenticationMechanisms = apiAuthenticationMechanisms;
-    this.legacyAuthenticationMechanism = legacyAuthenticationMechanism;
   }
 
   /**
@@ -60,13 +54,14 @@ public class RequestAuthenticator {
     if (auth.minimumLevel() == APP && !authResult.isAuthenticated()) {
       logger.atWarning().log("Not authorized; no authentication found.");
       return Optional.empty();
-    } else if (auth.minimumLevel() == USER && authResult.authLevel() != USER) {
+    }
+    if (auth.minimumLevel() == USER && authResult.authLevel() != USER) {
       logger.atWarning().log("Not authorized; no authenticated user.");
       return Optional.empty();
     }
     if (auth.userPolicy() == ADMIN
-        && authResult.userAuthInfo().isPresent()
-        && !authResult.userAuthInfo().get().isUserAdmin()) {
+        && authResult.user().isPresent()
+        && !authResult.user().get().getUserRoles().isAdmin()) {
       logger.atWarning().log(
           "Not authorized; user policy is ADMIN, but the user was not an admin.");
       return Optional.empty();
@@ -81,30 +76,15 @@ public class RequestAuthenticator {
    * @param req the {@link HttpServletRequest}; some authentication mechanisms use HTTP headers
    * @return an authentication result; if no authentication was made, returns NOT_AUTHENTICATED
    */
-  private AuthResult authenticate(AuthSettings auth, HttpServletRequest req) {
+  AuthResult authenticate(AuthSettings auth, HttpServletRequest req) {
     checkAuthConfig(auth);
-    for (AuthMethod authMethod : auth.methods()) {
-      AuthResult authResult;
-      switch (authMethod) {
-          // API-based user authentication mechanisms, such as OAuth and OIDC.
-        case API:
-          for (AuthenticationMechanism authMechanism : apiAuthenticationMechanisms) {
-            authResult = authMechanism.authenticate(req);
-            if (authResult.isAuthenticated()) {
-              logger.atInfo().log(
-                  "Authenticated via %s: %s", authMechanism.getClass().getSimpleName(), authResult);
-              return authResult;
-            }
-          }
-          break;
-          // Legacy authentication via UserService
-        case LEGACY:
-          authResult = legacyAuthenticationMechanism.authenticate(req);
-          if (authResult.isAuthenticated()) {
-            logger.atInfo().log("Authenticated via legacy auth: %s", authResult);
-            return authResult;
-          }
-          break;
+    AuthResult authResult;
+    for (AuthenticationMechanism authMechanism : apiAuthenticationMechanisms) {
+      authResult = authMechanism.authenticate(req);
+      if (authResult.isAuthenticated()) {
+        logger.atInfo().log(
+            "Authenticated via %s: %s", authMechanism.getClass().getSimpleName(), authResult);
+        return authResult;
       }
     }
     logger.atInfo().log("No authentication found.");
@@ -113,11 +93,6 @@ public class RequestAuthenticator {
 
   /** Validates an AuthSettings object, checking for invalid setting combinations. */
   static void checkAuthConfig(AuthSettings auth) {
-    ImmutableList<AuthMethod> authMethods = ImmutableList.copyOf(auth.methods());
-    checkArgument(!authMethods.isEmpty(), "Must specify at least one auth method");
-    checkArgument(
-        Ordering.explicit(AuthMethod.API, AuthMethod.LEGACY).isStrictlyOrdered(authMethods),
-        "Auth methods must be unique and strictly in order - API, LEGACY");
     checkArgument(
         (auth.minimumLevel() != NONE) || (auth.userPolicy() != ADMIN),
         "Actions with minimal auth level at NONE should not specify ADMIN user policy");

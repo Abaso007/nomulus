@@ -15,13 +15,13 @@
 package google.registry.batch;
 
 import static com.google.common.base.Preconditions.checkArgument;
-import static google.registry.batch.BatchModule.PARAM_DRY_RUN;
 import static google.registry.beam.BeamUtils.createJobName;
 import static google.registry.model.common.Cursor.CursorType.RECURRING_BILLING;
 import static google.registry.persistence.transaction.TransactionManagerFactory.tm;
+import static google.registry.request.RequestParameters.PARAM_DRY_RUN;
 import static google.registry.util.DateTimeUtils.START_OF_TIME;
-import static javax.servlet.http.HttpServletResponse.SC_INTERNAL_SERVER_ERROR;
-import static javax.servlet.http.HttpServletResponse.SC_OK;
+import static jakarta.servlet.http.HttpServletResponse.SC_INTERNAL_SERVER_ERROR;
+import static jakarta.servlet.http.HttpServletResponse.SC_OK;
 
 import com.google.api.services.dataflow.Dataflow;
 import com.google.api.services.dataflow.model.LaunchFlexTemplateParameter;
@@ -31,15 +31,16 @@ import com.google.common.collect.ImmutableMap;
 import com.google.common.flogger.FluentLogger;
 import google.registry.beam.billing.ExpandBillingRecurrencesPipeline;
 import google.registry.config.RegistryConfig.Config;
-import google.registry.config.RegistryEnvironment;
 import google.registry.model.billing.BillingEvent;
 import google.registry.model.billing.BillingRecurrence;
 import google.registry.model.common.Cursor;
 import google.registry.request.Action;
+import google.registry.request.Action.GaeService;
 import google.registry.request.Parameter;
 import google.registry.request.Response;
 import google.registry.request.auth.Auth;
 import google.registry.util.Clock;
+import google.registry.util.RegistryEnvironment;
 import java.io.IOException;
 import java.util.Optional;
 import javax.inject.Inject;
@@ -50,9 +51,9 @@ import org.joda.time.DateTime;
  * BillingRecurrence} billing events into synthetic {@link BillingEvent} events.
  */
 @Action(
-    service = Action.Service.BACKEND,
+    service = GaeService.BACKEND,
     path = "/_dr/task/expandBillingRecurrences",
-    auth = Auth.AUTH_API_ADMIN)
+    auth = Auth.AUTH_ADMIN)
 public class ExpandBillingRecurrencesAction implements Runnable {
 
   public static final String PARAM_START_TIME = "startTime";

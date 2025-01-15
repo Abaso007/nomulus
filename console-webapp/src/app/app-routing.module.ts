@@ -1,4 +1,4 @@
-// Copyright 2023 The Nomulus Authors. All Rights Reserved.
+// Copyright 2024 The Nomulus Authors. All Rights Reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -13,63 +13,127 @@
 // limitations under the License.
 
 import { NgModule } from '@angular/core';
-import { RouterModule, Routes } from '@angular/router';
-import { TldsComponent } from './tlds/tlds.component';
+import { Route, RouterModule } from '@angular/router';
+import { BillingInfoComponent } from './billingInfo/billingInfo.component';
+import { DomainListComponent } from './domains/domainList.component';
 import { HomeComponent } from './home/home.component';
-import { SettingsComponent } from './settings/settings.component';
-import SettingsContactComponent from './settings/contact/contact.component';
-import SettingsWhoisComponent from './settings/whois/whois.component';
-import SettingsUsersComponent from './settings/users/users.component';
-import SettingsSecurityComponent from './settings/security/security.component';
-import { RegistrarGuard } from './registrar/registrar.guard';
+import { RegistryLockVerifyComponent } from './lock/registryLockVerify.component';
+import { RegistrarDetailsComponent } from './registrar/registrarDetails.component';
 import { RegistrarComponent } from './registrar/registrarsTable.component';
-import { EmptyRegistrar } from './registrar/emptyRegistrar.component';
+import { ResourcesComponent } from './resources/resources.component';
+import ContactComponent from './settings/contact/contact.component';
+import SecurityComponent from './settings/security/security.component';
+import { SettingsComponent } from './settings/settings.component';
+import WhoisComponent from './settings/whois/whois.component';
+import { SupportComponent } from './support/support.component';
 
-const routes: Routes = [
+export interface RouteWithIcon extends Route {
+  iconName?: string;
+}
+
+export const PATHS = {
+  NewOteComponent: 'new-ote',
+  OteStatusComponent: 'ote-status/:registrarId',
+  UsersComponent: 'users',
+};
+export const routes: RouteWithIcon[] = [
   { path: '', redirectTo: '/home', pathMatch: 'full' },
-  { path: 'registrars', component: RegistrarComponent },
-  { path: 'empty-registrar', component: EmptyRegistrar },
-  { path: 'home', component: HomeComponent, canActivate: [RegistrarGuard] },
-  { path: 'tlds', component: TldsComponent, canActivate: [RegistrarGuard] },
   {
-    path: 'settings',
+    path: RegistryLockVerifyComponent.PATH,
+    component: RegistryLockVerifyComponent,
+  },
+  {
+    path: PATHS.NewOteComponent,
+    loadComponent: () =>
+      import('./ote/newOte.component').then((mod) => mod.NewOteComponent),
+  },
+  {
+    path: PATHS.OteStatusComponent,
+    loadComponent: () =>
+      import('./ote/oteStatus.component').then((mod) => mod.OteStatusComponent),
+  },
+  { path: 'registrars', component: RegistrarComponent },
+  {
+    path: 'home',
+    component: HomeComponent,
+    title: 'Dashboard',
+    iconName: 'view_comfy_alt',
+  },
+  // { path: 'tlds', component: TldsComponent, title: "TLDs", iconName: "event_list" },
+  {
+    path: DomainListComponent.PATH,
+    component: DomainListComponent,
+    title: 'Domains',
+    iconName: 'view_list',
+  },
+  {
+    path: SettingsComponent.PATH,
     component: SettingsComponent,
+    title: 'Settings',
+    iconName: 'settings',
     children: [
       {
         path: '',
-        redirectTo: 'registrars',
+        redirectTo: ContactComponent.PATH,
         pathMatch: 'full',
       },
       {
-        path: 'contact',
-        component: SettingsContactComponent,
-        canActivate: [RegistrarGuard],
+        path: ContactComponent.PATH,
+        component: ContactComponent,
+        title: 'Contacts',
       },
       {
-        path: 'whois',
-        component: SettingsWhoisComponent,
-        canActivate: [RegistrarGuard],
+        path: WhoisComponent.PATH,
+        component: WhoisComponent,
+        title: 'WHOIS Info',
       },
       {
-        path: 'security',
-        component: SettingsSecurityComponent,
-        canActivate: [RegistrarGuard],
-      },
-      {
-        path: 'epp-password',
-        component: SettingsSecurityComponent,
-        canActivate: [RegistrarGuard],
-      },
-      {
-        path: 'users',
-        component: SettingsUsersComponent,
-        canActivate: [RegistrarGuard],
-      },
-      {
-        path: 'registrars',
-        component: RegistrarComponent,
+        path: SecurityComponent.PATH,
+        component: SecurityComponent,
+        title: 'Security',
       },
     ],
+  },
+  // {
+  //   path: EppConsole.PATH,
+  //   component: EppConsoleComponent,
+  //   title: "EPP Console",
+  //   iconName: "upgrade"
+  // },
+  {
+    path: RegistrarComponent.PATH,
+    component: RegistrarComponent,
+    title: 'Registrars',
+    iconName: 'account_circle',
+  },
+  {
+    path: RegistrarDetailsComponent.PATH,
+    component: RegistrarDetailsComponent,
+  },
+  {
+    path: BillingInfoComponent.PATH,
+    component: BillingInfoComponent,
+    title: 'Billing Info',
+    iconName: 'credit_card',
+  },
+  {
+    path: ResourcesComponent.PATH,
+    component: ResourcesComponent,
+    title: 'Resources',
+    iconName: 'description',
+  },
+  {
+    path: PATHS.UsersComponent,
+    title: 'Users',
+    iconName: 'manage_accounts',
+    loadComponent: () =>
+      import('./users/users.component').then((mod) => mod.UsersComponent),
+  },
+  {
+    path: SupportComponent.PATH,
+    component: SupportComponent,
+    title: 'Support',
+    iconName: 'help',
   },
 ];
 

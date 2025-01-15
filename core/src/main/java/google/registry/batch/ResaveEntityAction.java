@@ -25,10 +25,12 @@ import com.google.common.flogger.FluentLogger;
 import google.registry.model.EppResource;
 import google.registry.persistence.VKey;
 import google.registry.request.Action;
+import google.registry.request.Action.GaeService;
 import google.registry.request.Action.Method;
 import google.registry.request.Parameter;
 import google.registry.request.Response;
 import google.registry.request.auth.Auth;
+import java.util.Optional;
 import javax.inject.Inject;
 import org.joda.time.DateTime;
 
@@ -38,9 +40,9 @@ import org.joda.time.DateTime;
  * <p>{@link EppResource}s will be projected forward to the current time.
  */
 @Action(
-    service = Action.Service.BACKEND,
+    service = GaeService.BACKEND,
     path = ResaveEntityAction.PATH,
-    auth = Auth.AUTH_API_ADMIN,
+    auth = Auth.AUTH_ADMIN,
     method = Method.POST)
 public class ResaveEntityAction implements Runnable {
 
@@ -74,8 +76,15 @@ public class ResaveEntityAction implements Runnable {
         "Re-saving entity %s which was enqueued at %s.", resourceKey, requestedTime);
     tm().transact(
             () -> {
-              EppResource entity = tm().loadByKey(VKey.createEppVKeyFromString(resourceKey));
-              tm().put(entity.cloneProjectedAtTime(tm().getTransactionTime()));
+              Optional<EppResource> entity =
+                  tm().loadByKeyIfPresent(VKey.createEppVKeyFromString(resourceKey));
+              if (entity.isEmpty()) {
+                logger.atSevere().log(
+                    "Could not re-save entity %s because it does not exist; failing permanently.",
+                    resourceKey);
+                return;
+              }
+              tm().put(entity.get().cloneProjectedAtTime(tm().getTransactionTime()));
               if (!resaveTimes.isEmpty()) {
                 asyncTaskEnqueuer.enqueueAsyncResave(
                     VKey.createEppVKeyFromString(resourceKey), requestedTime, resaveTimes);

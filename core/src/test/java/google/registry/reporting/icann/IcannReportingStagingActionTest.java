@@ -19,6 +19,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 import com.google.cloud.tasks.v2.HttpMethod;
@@ -35,8 +36,8 @@ import google.registry.testing.FakeResponse;
 import google.registry.testing.FakeSleeper;
 import google.registry.util.EmailMessage;
 import google.registry.util.Retrier;
+import jakarta.mail.internet.InternetAddress;
 import java.util.Optional;
-import javax.mail.internet.InternetAddress;
 import org.joda.time.DateTime;
 import org.joda.time.Duration;
 import org.joda.time.YearMonth;
@@ -60,10 +61,11 @@ class IcannReportingStagingActionTest {
     action.yearMonth = yearMonth;
     action.overrideSubdir = Optional.of(subdir);
     action.reportTypes = ImmutableSet.of(ReportType.ACTIVITY, ReportType.TRANSACTIONS);
+    action.sendEmail = true;
+    action.shouldUpload = true;
     action.response = response;
     action.stager = stager;
     action.retrier = new Retrier(new FakeSleeper(new FakeClock()), 3);
-    action.sender = new InternetAddress("sender@example.com");
     action.recipient = new InternetAddress("recipient@example.com");
     action.gmailClient = mock(GmailClient.class);
     action.cloudTasksUtils = cloudTasksHelper.getTestCloudTasksUtils();
@@ -94,8 +96,7 @@ class IcannReportingStagingActionTest {
             EmailMessage.create(
                 "ICANN Monthly report staging summary [SUCCESS]",
                 "Completed staging the following 2 ICANN reports:\na\nb",
-                new InternetAddress("recipient@example.com"),
-                new InternetAddress("sender@example.com")));
+                new InternetAddress("recipient@example.com")));
     assertUploadTaskEnqueued();
   }
 
@@ -110,8 +111,7 @@ class IcannReportingStagingActionTest {
             EmailMessage.create(
                 "ICANN Monthly report staging summary [SUCCESS]",
                 "Completed staging the following 4 ICANN reports:\na\nb\nc\nd",
-                new InternetAddress("recipient@example.com"),
-                new InternetAddress("sender@example.com")));
+                new InternetAddress("recipient@example.com")));
     assertUploadTaskEnqueued();
   }
 
@@ -129,8 +129,7 @@ class IcannReportingStagingActionTest {
             EmailMessage.create(
                 "ICANN Monthly report staging summary [SUCCESS]",
                 "Completed staging the following 4 ICANN reports:\na\nb\nc\nd",
-                new InternetAddress("recipient@example.com"),
-                new InternetAddress("sender@example.com")));
+                new InternetAddress("recipient@example.com")));
     assertUploadTaskEnqueued();
   }
 
@@ -153,9 +152,35 @@ class IcannReportingStagingActionTest {
                 "ICANN Monthly report staging summary [FAILURE]",
                 "Staging failed due to google.registry.bigquery.BigqueryJobFailureException: "
                     + "BigqueryJobFailureException: Expected failure, check logs for more details.",
-                new InternetAddress("recipient@example.com"),
-                new InternetAddress("sender@example.com")));
+                new InternetAddress("recipient@example.com")));
     // Assert no upload task enqueued
+    cloudTasksHelper.assertNoTasksEnqueued("retryable-cron-tasks");
+  }
+
+  @Test
+  void testSkipsEmail() throws Exception {
+    action.sendEmail = false;
+    action.run();
+    verify(stager).stageReports(yearMonth, subdir, ReportType.ACTIVITY);
+    verify(stager).stageReports(yearMonth, subdir, ReportType.TRANSACTIONS);
+    verify(stager).createAndUploadManifest(subdir, ImmutableList.of("a", "b", "c", "d"));
+    verifyNoInteractions(action.gmailClient);
+    assertUploadTaskEnqueued();
+  }
+
+  @Test
+  void testSkipsUpload() throws Exception {
+    action.shouldUpload = false;
+    action.run();
+    verify(stager).stageReports(yearMonth, subdir, ReportType.ACTIVITY);
+    verify(stager).stageReports(yearMonth, subdir, ReportType.TRANSACTIONS);
+    verify(stager).createAndUploadManifest(subdir, ImmutableList.of("a", "b", "c", "d"));
+    verify(action.gmailClient)
+        .sendEmail(
+            EmailMessage.create(
+                "ICANN Monthly report staging summary [SUCCESS]",
+                "Completed staging the following 4 ICANN reports:\na\nb\nc\nd",
+                new InternetAddress("recipient@example.com")));
     cloudTasksHelper.assertNoTasksEnqueued("retryable-cron-tasks");
   }
 

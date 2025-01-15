@@ -14,6 +14,7 @@
 
 package google.registry.tools;
 
+import static com.google.common.base.Preconditions.checkArgument;
 import static google.registry.persistence.transaction.TransactionManagerFactory.tm;
 import static google.registry.util.PreconditionsUtils.checkArgumentNotNull;
 
@@ -22,7 +23,6 @@ import com.google.common.collect.ImmutableMap;
 import google.registry.model.console.GlobalRole;
 import google.registry.model.console.RegistrarRole;
 import google.registry.model.console.User;
-import google.registry.model.console.UserDao;
 import google.registry.model.console.UserRoles;
 import google.registry.tools.params.KeyValueMapParameter.StringToRegistrarRoleMap;
 import java.util.Optional;
@@ -31,9 +31,25 @@ import javax.annotation.Nullable;
 /** Shared base class for commands that create or modify a {@link User}. */
 public abstract class CreateOrUpdateUserCommand extends ConfirmingCommand {
 
-  @Nullable
   @Parameter(names = "--email", description = "Email address of the user", required = true)
   String email;
+
+  @Nullable
+  @Parameter(
+      names = "--registry_lock_email_address",
+      description =
+          "Optional external email address to use for registry lock confirmation emails, or empty"
+              + " to remove the field.")
+  private String registryLockEmailAddress;
+
+  @Nullable
+  @Parameter(
+      names = "--registry_lock_password",
+      description =
+          "Sets the registry lock password for this user, or removes it (allowing the user to"
+              + " re-set it). Do not set the password explicitly unless in exceptional"
+              + " circumstances.")
+  private String registryLockPassword;
 
   @Nullable
   @Parameter(
@@ -61,7 +77,7 @@ public abstract class CreateOrUpdateUserCommand extends ConfirmingCommand {
   abstract User getExistingUser(String email);
 
   @Override
-  protected final String execute() throws Exception {
+  protected String execute() throws Exception {
     checkArgumentNotNull(email, "Email must be provided");
     tm().transact(this::executeInTransaction);
     return String.format("Saved user with email %s", email);
@@ -79,7 +95,34 @@ public abstract class CreateOrUpdateUserCommand extends ConfirmingCommand {
     User.Builder builder =
         (user == null) ? new User.Builder().setEmailAddress(email) : user.asBuilder();
     builder.setUserRoles(userRolesBuilder.build());
-    User newUser = builder.build();
-    UserDao.saveUser(newUser);
+
+    // An empty registryLockEmailAddress indicates that we should remove the field
+    if (registryLockEmailAddress != null) {
+      if (registryLockEmailAddress.isEmpty()) {
+        builder.setRegistryLockEmailAddress(null);
+      } else {
+        builder.setRegistryLockEmailAddress(registryLockEmailAddress);
+      }
+    }
+    // Ditto the registry lock password
+    if (registryLockPassword != null) {
+      if (registryLockEmailAddress != null) {
+        // Edge case, make sure we're not removing an email and setting a password at the same time
+        checkArgument(
+            !registryLockEmailAddress.isEmpty(),
+            "Cannot set/remove registry lock password on a user without a registry lock email"
+                + " address");
+      } else {
+        checkArgument(
+            user != null && user.getRegistryLockEmailAddress().isPresent(),
+            "Cannot set/remove registry lock password on a user without a registry lock email"
+                + " address");
+      }
+      builder.removeRegistryLockPassword();
+      if (!registryLockPassword.isEmpty()) {
+        builder.setRegistryLockPassword(registryLockPassword);
+      }
+    }
+    tm().put(builder.build());
   }
 }
