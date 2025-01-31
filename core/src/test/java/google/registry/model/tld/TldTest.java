@@ -16,7 +16,6 @@ package google.registry.model.tld;
 
 import static com.google.common.truth.Truth.assertThat;
 import static com.google.common.truth.Truth.assertWithMessage;
-import static com.google.common.truth.Truth8.assertThat;
 import static google.registry.model.EntityYamlUtils.createObjectMapper;
 import static google.registry.model.ImmutableObjectSubject.assertAboutImmutableObjects;
 import static google.registry.model.domain.token.AllocationToken.TokenType.DEFAULT_PROMO;
@@ -149,6 +148,7 @@ public final class TldTest extends EntityTestCase {
             .asBuilder()
             .setDnsAPlusAaaaTtl(Duration.standardHours(1))
             .setDnsWriters(ImmutableSet.of("baz", "bang"))
+            // set create billing cost back to the default (database helper sets it to $13)
             .setEapFeeSchedule(
                 ImmutableSortedMap.of(
                     START_OF_TIME,
@@ -217,18 +217,54 @@ public final class TldTest extends EntityTestCase {
   }
 
   @Test
-  void testSettingCreateBillingCost() {
-    Tld registry = Tld.get("tld").asBuilder().setCreateBillingCost(Money.of(USD, 42)).build();
-    assertThat(registry.getCreateBillingCost()).isEqualTo(Money.of(USD, 42));
-    // The default value of 17 is set in createTld().
-    assertThat(registry.getRestoreBillingCost()).isEqualTo(Money.of(USD, 17));
+  void testSetCreateBillingCostTransitions() {
+    ImmutableSortedMap<DateTime, Money> createCostTransitions =
+        ImmutableSortedMap.of(
+            START_OF_TIME,
+            Money.of(USD, 8),
+            fakeClock.nowUtc(),
+            Money.of(USD, 1),
+            fakeClock.nowUtc().plusMonths(1),
+            Money.of(USD, 2),
+            fakeClock.nowUtc().plusMonths(2),
+            Money.of(USD, 3));
+    Tld registry =
+        Tld.get("tld").asBuilder().setCreateBillingCostTransitions(createCostTransitions).build();
+    assertThat(registry.getCreateBillingCostTransitions()).isEqualTo(createCostTransitions);
+    assertThat(registry.getCreateBillingCost(fakeClock.nowUtc().minus(Duration.standardDays(5))))
+        .isEqualTo(Money.of(USD, 8));
+    assertThat(registry.getCreateBillingCost(fakeClock.nowUtc().plusMonths(8)))
+        .isEqualTo(Money.of(USD, 3));
+  }
+
+  @Test
+  void testSetCreateBillingCostTransitionsNegativeCost() throws Exception {
+    ImmutableSortedMap<DateTime, Money> createCostTransitions =
+        ImmutableSortedMap.of(
+            START_OF_TIME,
+            Money.of(USD, 8),
+            fakeClock.nowUtc(),
+            Money.of(USD, 1),
+            fakeClock.nowUtc().plusMonths(1),
+            Money.of(USD, -2),
+            fakeClock.nowUtc().plusMonths(2),
+            Money.of(USD, 3));
+    IllegalArgumentException thrown =
+        assertThrows(
+            IllegalArgumentException.class,
+            () ->
+                Tld.get("tld")
+                    .asBuilder()
+                    .setCreateBillingCostTransitions(createCostTransitions)
+                    .build());
+    assertThat(thrown.getMessage()).isEqualTo("Create billing cost cannot be negative");
   }
 
   @Test
   void testSettingRestoreBillingCost() {
     Tld registry = Tld.get("tld").asBuilder().setRestoreBillingCost(Money.of(USD, 42)).build();
     // The default value of 13 is set in createTld().
-    assertThat(registry.getCreateBillingCost()).isEqualTo(Money.of(USD, 13));
+    assertThat(registry.getCreateBillingCost(fakeClock.nowUtc())).isEqualTo(Money.of(USD, 13));
     assertThat(registry.getRestoreBillingCost()).isEqualTo(Money.of(USD, 42));
   }
 
@@ -252,7 +288,6 @@ public final class TldTest extends EntityTestCase {
                 .setName("tld-reserved15")
                 .setReservedListMapFromLines(
                     ImmutableList.of("potato,FULLY_BLOCKED", "phone,FULLY_BLOCKED"))
-                .setShouldPublish(true)
                 .setCreationTimestamp(fakeClock.nowUtc())
                 .build());
     ReservedList rl16 =
@@ -261,7 +296,6 @@ public final class TldTest extends EntityTestCase {
                 .setName("tld-reserved16")
                 .setReservedListMapFromLines(
                     ImmutableList.of("port,FULLY_BLOCKED", "manteau,FULLY_BLOCKED"))
-                .setShouldPublish(true)
                 .setCreationTimestamp(fakeClock.nowUtc())
                 .build());
     Tld registry1 =
@@ -292,6 +326,16 @@ public final class TldTest extends EntityTestCase {
   }
 
   @Test
+  void testFailure_testGetAllMissingTld() {
+    createTld("foo");
+    TldNotFoundException thrown =
+        assertThrows(
+            TldNotFoundException.class,
+            () -> assertThat(Tld.get(ImmutableSet.of("foo", "tld", "missing"))));
+    assertThat(thrown).hasMessageThat().isEqualTo("No TLD object(s) found for missing");
+  }
+
+  @Test
   void testSetReservedLists() {
     ReservedList rl5 =
         persistReservedList(
@@ -299,7 +343,6 @@ public final class TldTest extends EntityTestCase {
                 .setName("tld-reserved5")
                 .setReservedListMapFromLines(
                     ImmutableList.of("potato,FULLY_BLOCKED", "phone,FULLY_BLOCKED"))
-                .setShouldPublish(true)
                 .setCreationTimestamp(fakeClock.nowUtc())
                 .build());
     ReservedList rl6 =
@@ -308,7 +351,6 @@ public final class TldTest extends EntityTestCase {
                 .setName("tld-reserved6")
                 .setReservedListMapFromLines(
                     ImmutableList.of("port,FULLY_BLOCKED", "manteau,FULLY_BLOCKED"))
-                .setShouldPublish(true)
                 .setCreationTimestamp(fakeClock.nowUtc())
                 .build());
     Tld r = Tld.get("tld").asBuilder().setReservedLists(ImmutableSet.of(rl5, rl6)).build();
@@ -324,7 +366,6 @@ public final class TldTest extends EntityTestCase {
             .setName("tld-reserved15")
             .setReservedListMapFromLines(
                 ImmutableList.of("potato,FULLY_BLOCKED", "phone,FULLY_BLOCKED"))
-            .setShouldPublish(true)
             .setCreationTimestamp(fakeClock.nowUtc())
             .build());
     persistReservedList(
@@ -332,7 +373,6 @@ public final class TldTest extends EntityTestCase {
             .setName("tld-reserved16")
             .setReservedListMapFromLines(
                 ImmutableList.of("port,FULLY_BLOCKED", "manteau,FULLY_BLOCKED"))
-            .setShouldPublish(true)
             .setCreationTimestamp(fakeClock.nowUtc())
             .build());
     Tld r =
@@ -554,7 +594,13 @@ public final class TldTest extends EntityTestCase {
   void testFailure_pricingEngineIsRequired() {
     IllegalArgumentException thrown =
         assertThrows(
-            IllegalArgumentException.class, () -> new Tld.Builder().setTldStr("invalid").build());
+            IllegalArgumentException.class,
+            () ->
+                new Tld.Builder()
+                    .setCreateBillingCostTransitions(
+                        ImmutableSortedMap.of(START_OF_TIME, Money.of(USD, 13)))
+                    .setTldStr("invalid")
+                    .build());
     assertThat(thrown)
         .hasMessageThat()
         .contains("All registries must have a configured pricing engine");
@@ -571,15 +617,6 @@ public final class TldTest extends EntityTestCase {
                     .setRenewBillingCostTransitions(
                         ImmutableSortedMap.of(START_OF_TIME, Money.of(USD, -42))));
     assertThat(thrown).hasMessageThat().contains("billing cost cannot be negative");
-  }
-
-  @Test
-  void testFailure_negativeCreateBillingCost() {
-    IllegalArgumentException thrown =
-        assertThrows(
-            IllegalArgumentException.class,
-            () -> Tld.get("tld").asBuilder().setCreateBillingCost(Money.of(USD, -42)));
-    assertThat(thrown).hasMessageThat().contains("createBillingCost cannot be negative");
   }
 
   @Test
@@ -639,8 +676,13 @@ public final class TldTest extends EntityTestCase {
     IllegalArgumentException thrown =
         assertThrows(
             IllegalArgumentException.class,
-            () -> Tld.get("tld").asBuilder().setCreateBillingCost(Money.of(EUR, 42)).build());
-    assertThat(thrown).hasMessageThat().contains("cost must be in the tld's currency");
+            () ->
+                Tld.get("tld")
+                    .asBuilder()
+                    .setCreateBillingCostTransitions(
+                        ImmutableSortedMap.of(START_OF_TIME, Money.of(EUR, 42)))
+                    .build());
+    assertThat(thrown).hasMessageThat().contains("cost must be in the TLD's currency");
   }
 
   @Test

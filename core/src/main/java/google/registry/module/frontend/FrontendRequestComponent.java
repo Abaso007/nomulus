@@ -26,20 +26,21 @@ import google.registry.request.RequestComponentBuilder;
 import google.registry.request.RequestModule;
 import google.registry.request.RequestScope;
 import google.registry.ui.server.console.ConsoleDomainGetAction;
+import google.registry.ui.server.console.ConsoleDomainListAction;
+import google.registry.ui.server.console.ConsoleDumDownloadAction;
+import google.registry.ui.server.console.ConsoleEppPasswordAction;
+import google.registry.ui.server.console.ConsoleModule;
+import google.registry.ui.server.console.ConsoleOteAction;
+import google.registry.ui.server.console.ConsoleRegistryLockAction;
+import google.registry.ui.server.console.ConsoleRegistryLockVerifyAction;
+import google.registry.ui.server.console.ConsoleUpdateRegistrarAction;
 import google.registry.ui.server.console.ConsoleUserDataAction;
+import google.registry.ui.server.console.ConsoleUsersAction;
 import google.registry.ui.server.console.RegistrarsAction;
+import google.registry.ui.server.console.domains.ConsoleBulkDomainAction;
 import google.registry.ui.server.console.settings.ContactAction;
 import google.registry.ui.server.console.settings.SecurityAction;
 import google.registry.ui.server.console.settings.WhoisRegistrarFieldsAction;
-import google.registry.ui.server.registrar.ConsoleOteSetupAction;
-import google.registry.ui.server.registrar.ConsoleRegistrarCreatorAction;
-import google.registry.ui.server.registrar.ConsoleUiAction;
-import google.registry.ui.server.registrar.OteStatusAction;
-import google.registry.ui.server.registrar.RegistrarConsoleModule;
-import google.registry.ui.server.registrar.RegistrarSettingsAction;
-import google.registry.ui.server.registrar.RegistryLockGetAction;
-import google.registry.ui.server.registrar.RegistryLockPostAction;
-import google.registry.ui.server.registrar.RegistryLockVerifyAction;
 
 /** Dagger component with per-request lifetime for "default" App Engine module. */
 @RequestScope
@@ -48,34 +49,43 @@ import google.registry.ui.server.registrar.RegistryLockVerifyAction;
       BatchModule.class,
       DnsModule.class,
       EppTlsModule.class,
-      RegistrarConsoleModule.class,
+      ConsoleModule.class,
       RequestModule.class,
       WhiteboxModule.class,
     })
-interface FrontendRequestComponent {
+public interface FrontendRequestComponent {
+  ConsoleBulkDomainAction consoleBulkDomainAction();
+
   ConsoleDomainGetAction consoleDomainGetAction();
 
-  ConsoleOteSetupAction consoleOteSetupAction();
-  ConsoleRegistrarCreatorAction consoleRegistrarCreatorAction();
-  ConsoleUiAction consoleUiAction();
+  ConsoleDomainListAction consoleDomainListAction();
+
+  ConsoleEppPasswordAction consoleEppPasswordAction();
+
+  ConsoleOteAction consoleOteAction();
+
+  ConsoleRegistryLockAction consoleRegistryLockAction();
+
+  ConsoleRegistryLockVerifyAction consoleRegistryLockVerifyAction();
+
+  ConsoleUpdateRegistrarAction consoleUpdateRegistrarAction();
 
   ConsoleUserDataAction consoleUserDataAction();
+
+  ConsoleUsersAction consoleUsersAction();
+
+  ConsoleDumDownloadAction consoleDumDownloadAction();
 
   ContactAction contactAction();
 
   EppTlsAction eppTlsAction();
+
   FlowComponent.Builder flowComponentBuilder();
-  OteStatusAction oteStatusAction();
 
   RegistrarsAction registrarsAction();
 
-  RegistrarSettingsAction registrarSettingsAction();
-
-  RegistryLockGetAction registryLockGetAction();
-
-  RegistryLockPostAction registryLockPostAction();
-  RegistryLockVerifyAction registryLockVerifyAction();
   SecurityAction securityAction();
+
   WhoisRegistrarFieldsAction whoisRegistrarFieldsAction();
 
   @Subcomponent.Builder

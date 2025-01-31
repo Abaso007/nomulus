@@ -14,6 +14,7 @@
 package google.registry.model;
 
 import static com.google.common.collect.ImmutableSortedMap.toImmutableSortedMap;
+import static com.google.common.collect.ImmutableSortedSet.toImmutableSortedSet;
 import static com.google.common.collect.Ordering.natural;
 
 import com.fasterxml.jackson.core.JsonGenerator;
@@ -29,6 +30,8 @@ import com.fasterxml.jackson.databind.module.SimpleModule;
 import com.fasterxml.jackson.databind.ser.std.StdSerializer;
 import com.fasterxml.jackson.dataformat.yaml.YAMLFactory;
 import com.fasterxml.jackson.dataformat.yaml.YAMLGenerator.Feature;
+import com.google.common.collect.ImmutableSortedSet;
+import google.registry.model.common.FeatureFlag.FeatureStatus;
 import google.registry.model.common.TimedTransitionProperty;
 import google.registry.model.domain.token.AllocationToken;
 import google.registry.model.tld.Tld.TldState;
@@ -39,6 +42,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 import java.util.SortedMap;
 import org.joda.money.CurrencyUnit;
 import org.joda.money.Money;
@@ -55,14 +59,66 @@ public class EntityYamlUtils {
     SimpleModule module = new SimpleModule();
     module.addSerializer(Money.class, new MoneySerializer());
     module.addDeserializer(Money.class, new MoneyDeserializer());
+    module.addSerializer(Duration.class, new DurationSerializer());
+    module.addSerializer(TimedTransitionProperty.class, new TimedTransitionPropertySerializer());
     ObjectMapper mapper =
         JsonMapper.builder(new YAMLFactory().disable(Feature.WRITE_DOC_START_MARKER))
             .disable(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS)
             .enable(MapperFeature.SORT_PROPERTIES_ALPHABETICALLY)
-            .build()
-            .registerModule(module);
-    mapper.findAndRegisterModules();
+            .build();
+    mapper.findAndRegisterModules().registerModule(module);
     return mapper;
+  }
+
+  /**
+   * A custom serializer for String Set to sort the order and make YAML generation deterministic.
+   */
+  public static class SortedSetSerializer extends StdSerializer<Set<String>> {
+    public SortedSetSerializer() {
+      this(null);
+    }
+
+    public SortedSetSerializer(Class<Set<String>> t) {
+      super(t);
+    }
+
+    @Override
+    public void serialize(Set<String> value, JsonGenerator g, SerializerProvider provider)
+        throws IOException {
+      ImmutableSortedSet<String> sorted =
+          value.stream()
+              .collect(toImmutableSortedSet(String::compareTo)); // sort the entries into a new set
+      g.writeStartArray();
+      for (String entry : sorted) {
+        g.writeString(entry);
+      }
+      g.writeEndArray();
+    }
+  }
+
+  /** A custom serializer for Enum Set to sort the order and make YAML generation deterministic. */
+  public static class SortedEnumSetSerializer extends StdSerializer<Set<Enum>> {
+    public SortedEnumSetSerializer() {
+      this(null);
+    }
+
+    public SortedEnumSetSerializer(Class<Set<Enum>> t) {
+      super(t);
+    }
+
+    @Override
+    public void serialize(Set<Enum> value, JsonGenerator g, SerializerProvider provider)
+        throws IOException {
+      ImmutableSortedSet<String> sorted =
+          value.stream()
+              .map(Enum::name)
+              .collect(toImmutableSortedSet(String::compareTo)); // sort the entries into a new set
+      g.writeStartArray();
+      for (String entry : sorted) {
+        g.writeString(entry);
+      }
+      g.writeEndArray();
+    }
   }
 
   /** A custom JSON serializer for {@link Money}. */
@@ -147,6 +203,24 @@ public class EntityYamlUtils {
     }
   }
 
+  /** A custom JSON serializer for a {@link Duration} object. */
+  public static class DurationSerializer extends StdSerializer<Duration> {
+
+    public DurationSerializer() {
+      this(null);
+    }
+
+    public DurationSerializer(Class<Duration> t) {
+      super(t);
+    }
+
+    @Override
+    public void serialize(Duration value, JsonGenerator gen, SerializerProvider provider)
+        throws IOException {
+      gen.writeString(value.toString());
+    }
+  }
+
   /** A custom JSON serializer for an Optional of a {@link Duration} object. */
   public static class OptionalDurationSerializer extends StdSerializer<Optional<Duration>> {
 
@@ -162,7 +236,7 @@ public class EntityYamlUtils {
     public void serialize(Optional<Duration> value, JsonGenerator gen, SerializerProvider provider)
         throws IOException {
       if (value.isPresent()) {
-        gen.writeNumber(value.get().getMillis());
+        gen.writeString(value.get().toString());
       } else {
         gen.writeNull();
       }
@@ -238,6 +312,24 @@ public class EntityYamlUtils {
     }
   }
 
+  /** A custom JSON serializer for a {@link TimedTransitionProperty} of {@link Enum} values. */
+  public static class TimedTransitionPropertySerializer<E extends Enum<E>>
+      extends StdSerializer<TimedTransitionProperty<E>> {
+
+    TimedTransitionPropertySerializer() {
+      super(null, true);
+    }
+
+    @Override
+    public void serialize(
+        TimedTransitionProperty<E> data,
+        JsonGenerator jsonGenerator,
+        SerializerProvider serializerProvider)
+        throws IOException {
+      jsonGenerator.writeObject(data.toValueMap());
+    }
+  }
+
   /** A custom JSON deserializer for a {@link TimedTransitionProperty} of {@link TldState}. */
   public static class TimedTransitionPropertyTldStateDeserializer
       extends StdDeserializer<TimedTransitionProperty<TldState>> {
@@ -277,7 +369,7 @@ public class EntityYamlUtils {
     @Override
     public TimedTransitionProperty<Money> deserialize(JsonParser jp, DeserializationContext context)
         throws IOException {
-      SortedMap<String, LinkedHashMap> valueMap = jp.readValueAs(SortedMap.class);
+      SortedMap<String, LinkedHashMap<String, Object>> valueMap = jp.readValueAs(SortedMap.class);
       return TimedTransitionProperty.fromValueMap(
           valueMap.keySet().stream()
               .collect(
@@ -287,7 +379,34 @@ public class EntityYamlUtils {
                       key ->
                           Money.of(
                               CurrencyUnit.of(valueMap.get(key).get("currency").toString()),
-                              (double) valueMap.get(key).get("amount")))));
+                              new BigDecimal(String.valueOf(valueMap.get(key).get("amount")))))));
+    }
+  }
+
+  /** A custom JSON deserializer for a {@link TimedTransitionProperty} of {@link FeatureStatus}. */
+  public static class TimedTransitionPropertyFeatureStatusDeserializer
+      extends StdDeserializer<TimedTransitionProperty<FeatureStatus>> {
+
+    public TimedTransitionPropertyFeatureStatusDeserializer() {
+      this(null);
+    }
+
+    public TimedTransitionPropertyFeatureStatusDeserializer(
+        Class<TimedTransitionProperty<FeatureStatus>> t) {
+      super(t);
+    }
+
+    @Override
+    public TimedTransitionProperty<FeatureStatus> deserialize(
+        JsonParser jp, DeserializationContext context) throws IOException {
+      SortedMap<String, String> valueMap = jp.readValueAs(SortedMap.class);
+      return TimedTransitionProperty.fromValueMap(
+          valueMap.keySet().stream()
+              .collect(
+                  toImmutableSortedMap(
+                      natural(),
+                      DateTime::parse,
+                      key -> FeatureStatus.valueOf(valueMap.get(key)))));
     }
   }
 

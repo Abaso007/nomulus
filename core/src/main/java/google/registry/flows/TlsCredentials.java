@@ -16,6 +16,7 @@ package google.registry.flows;
 
 import static com.google.common.base.MoreObjects.toStringHelper;
 import static google.registry.request.RequestParameters.extractOptionalHeader;
+import static java.nio.charset.StandardCharsets.UTF_8;
 
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.collect.ImmutableList;
@@ -32,10 +33,12 @@ import google.registry.model.registrar.Registrar;
 import google.registry.request.Header;
 import google.registry.util.CidrAddressBlock;
 import google.registry.util.ProxyHttpHeaders;
+import google.registry.util.RegistryEnvironment;
+import jakarta.servlet.http.HttpServletRequest;
 import java.net.InetAddress;
+import java.security.MessageDigest;
 import java.util.Optional;
 import javax.inject.Inject;
-import javax.servlet.http.HttpServletRequest;
 
 /**
  * Container and validation for TLS certificate and IP-allow-listing.
@@ -64,11 +67,11 @@ public class TlsCredentials implements TransportCredentials {
   public TlsCredentials(
       @Config("requireSslCertificates") boolean requireSslCertificates,
       @Header(ProxyHttpHeaders.CERTIFICATE_HASH) Optional<String> clientCertificateHash,
-      @Header(ProxyHttpHeaders.IP_ADDRESS) Optional<String> clientAddress,
+      Optional<InetAddress> clientInetAddr,
       CertificateChecker certificateChecker) {
     this.requireSslCertificates = requireSslCertificates;
     this.clientCertificateHash = clientCertificateHash;
-    this.clientInetAddr = clientAddress.map(TlsCredentials::parseInetAddress);
+    this.clientInetAddr = clientInetAddr;
     this.certificateChecker = certificateChecker;
   }
 
@@ -102,25 +105,32 @@ public class TlsCredentials implements TransportCredentials {
     }
     // In the rare unexpected case that the client inet address wasn't passed along at all, then
     // by default deny access.
-    if (clientInetAddr.isPresent()) {
-      for (CidrAddressBlock cidrAddressBlock : ipAddressAllowList) {
-        if (cidrAddressBlock.contains(clientInetAddr.get())) {
-          // IP address is in allow list; return early.
-          return;
-        }
+    if (clientInetAddr.isEmpty()) {
+      logger.atWarning().log(
+          "Authentication error: Missing IP address for registrar %s.", registrar.getRegistrarId());
+      throw new BadRegistrarIpAddressException(clientInetAddr);
+    }
+    for (CidrAddressBlock cidrAddressBlock : ipAddressAllowList) {
+      if (cidrAddressBlock.contains(clientInetAddr.get())) {
+        // IP address is in allow list; return early.
+        return;
       }
     }
-    logger.atInfo().log(
+    logger.atWarning().log(
         "Authentication error: IP address %s is not allow-listed for registrar %s; allow list is:"
             + " %s",
-        clientInetAddr, registrar.getRegistrarId(), ipAddressAllowList);
+        clientInetAddr,
+        registrar.getRegistrarId(),
+        RegistryEnvironment.get() == RegistryEnvironment.PRODUCTION
+            ? "redacted in production"
+            : ipAddressAllowList);
     throw new BadRegistrarIpAddressException(clientInetAddr);
   }
 
   @VisibleForTesting
   void validateCertificateHash(Registrar registrar) throws AuthenticationErrorException {
-    if (!registrar.getClientCertificateHash().isPresent()
-        && !registrar.getFailoverClientCertificateHash().isPresent()) {
+    if (registrar.getClientCertificateHash().isEmpty()
+        && registrar.getFailoverClientCertificateHash().isEmpty()) {
       if (requireSslCertificates) {
         throw new RegistrarCertificateNotConfiguredException();
       } else {
@@ -130,15 +140,23 @@ public class TlsCredentials implements TransportCredentials {
       }
     }
     // Check that the request included the certificate hash
-    if (!clientCertificateHash.isPresent()) {
+    if (clientCertificateHash.isEmpty()) {
       logger.atInfo().log(
           "Request from registrar %s did not include X-SSL-Certificate.",
           registrar.getRegistrarId());
       throw new MissingRegistrarCertificateException();
     }
     // Check if the certificate hash is equal to the one on file for the registrar.
-    if (!clientCertificateHash.equals(registrar.getClientCertificateHash())
-        && !clientCertificateHash.equals(registrar.getFailoverClientCertificateHash())) {
+    byte[] certBytes = clientCertificateHash.get().getBytes(UTF_8);
+    if (!MessageDigest.isEqual(
+            certBytes,
+            registrar.getClientCertificateHash().map(x -> x.getBytes(UTF_8)).orElse(null))
+        && !MessageDigest.isEqual(
+            certBytes,
+            registrar
+                .getFailoverClientCertificateHash()
+                .map(x -> x.getBytes(UTF_8))
+                .orElse(null))) {
       logger.atWarning().log(
           "Non-matching certificate hash (%s) for %s, wanted either %s or %s.",
           clientCertificateHash,
@@ -222,7 +240,7 @@ public class TlsCredentials implements TransportCredentials {
               ? String.format(
                   "Registrar IP address %s is not in stored allow list",
                   clientInetAddr.get().getHostAddress())
-              : "Registrar IP address is not in stored allow list");
+              : "Registrar IP address is missing");
     }
   }
 
@@ -239,9 +257,14 @@ public class TlsCredentials implements TransportCredentials {
     }
 
     @Provides
-    @Header(ProxyHttpHeaders.IP_ADDRESS)
-    static Optional<String> provideIpAddress(HttpServletRequest req) {
-      return extractOptionalHeader(req, ProxyHttpHeaders.IP_ADDRESS);
+    static Optional<InetAddress> provideIpAddress(HttpServletRequest req) {
+      Optional<String> clientAddress = extractOptionalHeader(req, ProxyHttpHeaders.IP_ADDRESS);
+      Optional<String> fallbackClientAddress =
+          extractOptionalHeader(req, ProxyHttpHeaders.IP_ADDRESS);
+      Optional<InetAddress> clientInetAddr = clientAddress.map(TlsCredentials::parseInetAddress);
+      return clientInetAddr.isPresent()
+          ? clientInetAddr
+          : fallbackClientAddress.map(TlsCredentials::parseInetAddress);
     }
   }
 }

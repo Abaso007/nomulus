@@ -15,7 +15,6 @@
 package google.registry.flows.domain;
 
 import static com.google.common.truth.Truth.assertThat;
-import static com.google.common.truth.Truth8.assertThat;
 import static google.registry.testing.DatabaseHelper.assertBillingEvents;
 import static google.registry.testing.DatabaseHelper.assertDomainDnsRequests;
 import static google.registry.testing.DatabaseHelper.assertPollMessages;
@@ -70,11 +69,12 @@ import google.registry.model.domain.rgp.GracePeriodStatus;
 import google.registry.model.eppcommon.StatusValue;
 import google.registry.model.poll.PollMessage;
 import google.registry.model.registrar.Registrar;
-import google.registry.model.registrar.Registrar.State;
+import google.registry.model.registrar.RegistrarBase.State;
 import google.registry.model.reporting.DomainTransactionRecord;
 import google.registry.model.reporting.DomainTransactionRecord.TransactionReportField;
 import google.registry.model.reporting.HistoryEntry;
 import google.registry.model.tld.Tld;
+import google.registry.persistence.VKey;
 import google.registry.testing.DatabaseHelper;
 import java.util.Map;
 import java.util.Optional;
@@ -104,12 +104,12 @@ class DomainRestoreRequestFlowTest extends ResourceFlowTestCase<DomainRestoreReq
     setEppInput("domain_update_restore_request.xml", ImmutableMap.of("DOMAIN", "example.tld"));
   }
 
-  void persistPendingDeleteDomain() throws Exception {
+  Domain persistPendingDeleteDomain() throws Exception {
     // The domain is now past what had been its expiration date at the time of deletion.
-    persistPendingDeleteDomain(clock.nowUtc().minusDays(5));
+    return persistPendingDeleteDomain(clock.nowUtc().minusDays(5));
   }
 
-  void persistPendingDeleteDomain(DateTime expirationTime) throws Exception {
+  Domain persistPendingDeleteDomain(DateTime expirationTime) throws Exception {
     Domain domain = persistResource(DatabaseHelper.newDomain(getUniqueIdFromCommand()));
     HistoryEntry historyEntry =
         persistResource(
@@ -119,29 +119,31 @@ class DomainRestoreRequestFlowTest extends ResourceFlowTestCase<DomainRestoreReq
                 .setRegistrarId(domain.getCurrentSponsorRegistrarId())
                 .setDomain(domain)
                 .build());
-    persistResource(
-        domain
-            .asBuilder()
-            .setRegistrationExpirationTime(expirationTime)
-            .setDeletionTime(clock.nowUtc().plusDays(35))
-            .addGracePeriod(
-                GracePeriod.create(
-                    GracePeriodStatus.REDEMPTION,
-                    domain.getRepoId(),
-                    clock.nowUtc().plusDays(1),
-                    "TheRegistrar",
-                    null))
-            .setStatusValues(ImmutableSet.of(StatusValue.PENDING_DELETE))
-            .setDeletePollMessage(
-                persistResource(
-                        new PollMessage.OneTime.Builder()
-                            .setRegistrarId("TheRegistrar")
-                            .setEventTime(clock.nowUtc().plusDays(5))
-                            .setHistoryEntry(historyEntry)
-                            .build())
-                    .createVKey())
-            .build());
+    domain =
+        persistResource(
+            domain
+                .asBuilder()
+                .setRegistrationExpirationTime(expirationTime)
+                .setDeletionTime(clock.nowUtc().plusDays(35))
+                .addGracePeriod(
+                    GracePeriod.create(
+                        GracePeriodStatus.REDEMPTION,
+                        domain.getRepoId(),
+                        clock.nowUtc().plusDays(1),
+                        "TheRegistrar",
+                        null))
+                .setStatusValues(ImmutableSet.of(StatusValue.PENDING_DELETE))
+                .setDeletePollMessage(
+                    persistResource(
+                            new PollMessage.OneTime.Builder()
+                                .setRegistrarId("TheRegistrar")
+                                .setEventTime(clock.nowUtc().plusDays(5))
+                                .setHistoryEntry(historyEntry)
+                                .build())
+                        .createVKey())
+                .build());
     clock.advanceOneMilli();
+    return domain;
   }
 
   @Test
@@ -493,6 +495,15 @@ class DomainRestoreRequestFlowTest extends ResourceFlowTestCase<DomainRestoreReq
   }
 
   @Test
+  void testSuccess_worksWithoutPollMessage() throws Exception {
+    Domain domain = persistPendingDeleteDomain();
+    VKey<PollMessage.OneTime> deletePollMessage = domain.getDeletePollMessage();
+    persistResource(domain.asBuilder().setDeletePollMessage(null).build());
+    DatabaseHelper.deleteByKey(deletePollMessage);
+    runFlowAssertResponse(loadFile("generic_success_response.xml"));
+  }
+
+  @Test
   void testFailure_doesNotExist() throws Exception {
     ResourceDoesNotExistException thrown =
         assertThrows(ResourceDoesNotExistException.class, this::runFlow);
@@ -560,7 +571,8 @@ class DomainRestoreRequestFlowTest extends ResourceFlowTestCase<DomainRestoreReq
         Tld.get("tld")
             .asBuilder()
             .setCurrency(EUR)
-            .setCreateBillingCost(Money.of(EUR, 13))
+            .setCreateBillingCostTransitions(
+                ImmutableSortedMap.of(START_OF_TIME, Money.of(EUR, 13)))
             .setRestoreBillingCost(Money.of(EUR, 11))
             .setRenewBillingCostTransitions(ImmutableSortedMap.of(START_OF_TIME, Money.of(EUR, 7)))
             .setEapFeeSchedule(ImmutableSortedMap.of(START_OF_TIME, Money.zero(EUR)))
@@ -703,7 +715,8 @@ class DomainRestoreRequestFlowTest extends ResourceFlowTestCase<DomainRestoreReq
         Tld.get("tld")
             .asBuilder()
             .setCurrency(JPY)
-            .setCreateBillingCost(Money.ofMajor(JPY, 800))
+            .setCreateBillingCostTransitions(
+                ImmutableSortedMap.of(START_OF_TIME, Money.ofMajor(JPY, 800)))
             .setEapFeeSchedule(ImmutableSortedMap.of(START_OF_TIME, Money.ofMajor(JPY, 800)))
             .setRenewBillingCostTransitions(
                 ImmutableSortedMap.of(START_OF_TIME, Money.ofMajor(JPY, 800)))

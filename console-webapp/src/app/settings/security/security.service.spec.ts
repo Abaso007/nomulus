@@ -1,4 +1,4 @@
-// Copyright 2023 The Nomulus Authors. All Rights Reserved.
+// Copyright 2024 The Nomulus Authors. All Rights Reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,16 +14,20 @@
 
 import { TestBed } from '@angular/core/testing';
 
+import { provideHttpClient } from '@angular/common/http';
+import { provideHttpClientTesting } from '@angular/common/http/testing';
+import { MatSnackBar } from '@angular/material/snack-bar';
+import { BackendService } from 'src/app/shared/services/backend.service';
+import SecurityComponent from './security.component';
 import {
   SecurityService,
-  SecuritySettings,
-  SecuritySettingsBackendModel,
   apiToUiConverter,
   uiToApiConverter,
 } from './security.service';
-import { HttpClientTestingModule } from '@angular/common/http/testing';
-import SecurityComponent from './security.component';
-import { BackendService } from 'src/app/shared/services/backend.service';
+import {
+  SecuritySettings,
+  SecuritySettingsBackendModel,
+} from 'src/app/registrar/registrar.service';
 
 describe('SecurityService', () => {
   const uiMockData: SecuritySettings = {
@@ -41,9 +45,15 @@ describe('SecurityService', () => {
 
   beforeEach(() => {
     TestBed.configureTestingModule({
-      imports: [HttpClientTestingModule],
       declarations: [SecurityComponent],
-      providers: [SecurityService, BackendService],
+      imports: [],
+      providers: [
+        MatSnackBar,
+        SecurityService,
+        BackendService,
+        provideHttpClient(),
+        provideHttpClientTesting(),
+      ],
     });
     service = TestBed.inject(SecurityService);
   });

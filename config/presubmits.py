@@ -87,10 +87,11 @@ PRESUBMITS = {
     PresubmitCheck(
         r".*Copyright 20\d{2} The Nomulus Authors\. All Rights Reserved\.",
         ("java", "js", "soy", "sql", "py", "sh", "gradle", "ts"), {
-            ".git", "/build/", "/generated/", "/generated_tests/",
+            ".git", "/build/", "/bin/generated-sources/", "/bin/generated-test-sources/",
             "node_modules/", "LoggerConfig.java", "registrar_bin.",
             "registrar_dbg.", "google-java-format-diff.py",
-            "nomulus.golden.sql", "soyutils_usegoog.js", "javascript/checks.js"
+            "nomulus.golden.sql", "soyutils_usegoog.js", "javascript/checks.js",
+            "/src/main/generated", "/src/test/generated"
         }, REQUIRED):
         "File did not include the license header.",
 
@@ -99,12 +100,12 @@ PRESUBMITS = {
                    {"node_modules/"}, REQUIRED):
         "Source files must end in a newline.",
 
-    # System.(out|err).println should only appear in tools/
+    # System.(out|err).println should only appear in tools/ or load-testing/
     PresubmitCheck(
         r".*\bSystem\.(out|err)\.print", "java", {
             "StackdriverDashboardBuilder.java", "/tools/", "/example/",
-            "RegistryTestServerMain.java", "TestServerExtension.java",
-            "FlowDocumentationTool.java"
+            "/load-testing/", "RegistryTestServerMain.java",
+            "TestServerExtension.java", "FlowDocumentationTool.java"
         }):
         "System.(out|err).println is only allowed in tools/ packages. Please "
         "use a logger instead.",
@@ -171,6 +172,42 @@ PRESUBMITS = {
         {"/node_modules/", "google/registry/ui/js/util.js", "registrar_bin."},
     ):
         "JavaScript files should not include console logging.",
+    PresubmitCheck(
+        r".*\nimport (static )?.*\.shaded\..*",
+        "java",
+        {"/node_modules/"},
+    ):
+        "Do not use shaded dependencies",
+    PresubmitCheck(
+        r".*com\.google\.common\.truth\.Truth8.*",
+        "java",
+        {"/node_modules/"},
+    ):
+        "Truth8 is deprecated. Use Truth instead.",
+    PresubmitCheck(
+        r".*java\.util\.Date.*",
+        "java",
+        {"/node_modules/", "JpaTransactionManagerImpl.java"},
+    ):
+        "Do not use java.util.Date. Use classes in java.time package instead.",
+    PresubmitCheck(
+        r".*com\.google\.api\.client\.http\.HttpStatusCodes.*",
+        "java",
+        {"/node_modules/"},
+    ):
+        "Use status code from jakarta.servlet.http.HttpServletResponse.",
+    PresubmitCheck(
+        r".*mock\(Response\.class\).*",
+        "java",
+        {"/node_modules/"},
+    ):
+        "Do not mock Response, use FakeResponse.",
+    PresubmitCheck(
+        r".*javax\.servlet\..*",
+        "java",
+        {"/node_modules/"},
+    ):
+        "Do not use javax.servlet.* Use jakarta.servlet.* instead.",
 }
 
 # Note that this regex only works for one kind of Flyway file.  If we want to

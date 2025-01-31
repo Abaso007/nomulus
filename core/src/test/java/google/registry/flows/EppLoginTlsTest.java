@@ -23,6 +23,7 @@ import static google.registry.util.X509Utils.getCertificateHash;
 import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.ImmutableSortedMap;
+import com.google.common.net.InetAddresses;
 import google.registry.flows.certs.CertificateChecker;
 import google.registry.persistence.transaction.JpaTestExtensions;
 import google.registry.persistence.transaction.JpaTestExtensions.JpaIntegrationTestExtension;
@@ -32,14 +33,14 @@ import google.registry.util.SelfSignedCaCertificate;
 import java.io.StringWriter;
 import java.security.cert.X509Certificate;
 import java.util.Optional;
+import org.bouncycastle.openssl.jcajce.JcaMiscPEMGenerator;
+import org.bouncycastle.util.io.pem.PemObjectGenerator;
+import org.bouncycastle.util.io.pem.PemWriter;
 import org.joda.time.DateTime;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Order;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.RegisterExtension;
-import org.testcontainers.shaded.org.bouncycastle.openssl.jcajce.JcaMiscPEMGenerator;
-import org.testcontainers.shaded.org.bouncycastle.util.io.pem.PemObjectGenerator;
-import org.testcontainers.shaded.org.bouncycastle.util.io.pem.PemWriter;
 
 /** Test logging in with TLS credentials. */
 class EppLoginTlsTest extends EppTestCase {
@@ -66,7 +67,7 @@ class EppLoginTlsTest extends EppTestCase {
         new TlsCredentials(
             true,
             Optional.ofNullable(clientCertificateHash),
-            Optional.of("192.168.1.100:54321"),
+            Optional.of(InetAddresses.forString("192.168.1.100")),
             certificateChecker));
   }
 
@@ -253,9 +254,10 @@ class EppLoginTlsTest extends EppTestCase {
                 "CODE",
                 "2200",
                 "MSG",
-                "Registrar certificate contains the following security violations:\n"
-                    + "Certificate is expired.\n"
-                    + "Certificate validity period is too long; it must be less than or equal to"
-                    + " 398 days."));
+                """
+                    Registrar certificate contains the following security violations:
+                    Certificate is expired.
+                    Certificate validity period is too long; it must be less than or equal to 398\
+                     days."""));
   }
 }

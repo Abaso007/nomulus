@@ -37,12 +37,12 @@ public class RegistryConfigSettings {
   public Monitoring monitoring;
   public Misc misc;
   public Beam beam;
-  public Keyring keyring;
   public RegistryTool registryTool;
   public SslCertificateValidation sslCertificateValidation;
   public ContactHistory contactHistory;
   public DnsUpdate dnsUpdate;
   public BulkPricingPackageMonitoring bulkPricingPackageMonitoring;
+  public Bsa bsa;
 
   /** Configuration options that apply to the entire GCP project. */
   public static class GcpProject {
@@ -52,15 +52,14 @@ public class RegistryConfigSettings {
     public boolean isLocal;
     public String defaultServiceUrl;
     public String backendServiceUrl;
+    public String bsaServiceUrl;
     public String toolsServiceUrl;
     public String pubapiServiceUrl;
+    public String baseDomain;
   }
 
   /** Configuration options for authenticating users. */
   public static class Auth {
-    public List<String> availableOauthScopes;
-    public List<String> requiredOauthScopes;
-    public List<String> allowedOauthClientIds;
     public List<String> allowedServiceAccountEmails;
     public String oauthClientId;
   }
@@ -83,6 +82,7 @@ public class RegistryConfigSettings {
     public String outgoingEmailDisplayName;
     public String adminAccountEmailAddress;
     public String supportGroupEmailAddress;
+    public String consoleUserGroupEmailAddress;
   }
 
   /** Configuration options for registry policy. */
@@ -105,17 +105,20 @@ public class RegistryConfigSettings {
     public String reservedTermsExportDisclaimer;
     public String whoisRedactedEmailText;
     public String whoisDisclaimer;
+    public String domainBlockedByBsaTemplate;
     public String rdapTos;
     public String rdapTosStaticUrl;
     public String registryName;
     public List<String> spec11WebResources;
     public boolean requireSslCertificates;
     public double sunriseDomainCreateDiscount;
+    public Set<String> tieredPricingPromotionRegistrarIds;
+    public Set<String> noPollMessageOnDeletionRegistrarIds;
   }
 
   /** Configuration for Hibernate. */
   public static class Hibernate {
-    public boolean perTransactionIsolation;
+    public boolean allowNestedTransactions;
     public String connectionIsolation;
     public String logSqlQueries;
     public String hikariConnectionTimeout;
@@ -129,7 +132,7 @@ public class RegistryConfigSettings {
   /** Configuration for Cloud SQL. */
   public static class CloudSql {
     public String jdbcUrl;
-    // TODO(05012021): remove username field after it is removed from all yaml files.
+    // TODO(05012021): remove 3 fields below after they are removed from all yaml files.
     public String username;
     public String instanceConnectionName;
     public String replicaInstanceConnectionName;
@@ -172,6 +175,7 @@ public class RegistryConfigSettings {
     public List<String> invoiceEmailRecipients;
     public String invoiceReplyToEmailAddress;
     public String invoiceFilePrefix;
+    public String billingInvoiceOriginUrl;
   }
 
   /** Configuration for Registry Data Escrow (RDE). */
@@ -183,18 +187,10 @@ public class RegistryConfigSettings {
 
   /** Configuration for the web-based registrar console. */
   public static class RegistrarConsole {
-    public String logoFilename;
+    public String dumFileName;
     public String supportPhoneNumber;
     public String supportEmailAddress;
-    public String announcementsEmailAddress;
-    public String integrationEmailAddress;
     public String technicalDocsUrl;
-    public AnalyticsConfig analyticsConfig;
-  }
-
-  /** Configuration for analytics services installed in the registrar console */
-  public static class AnalyticsConfig {
-    public String googleAnalyticsId;
   }
 
   /** Configuration for monitoring. */
@@ -208,17 +204,13 @@ public class RegistryConfigSettings {
   public static class Misc {
     public String sheetExportId;
     public boolean isEmailSendingEnabled;
+    public int emailThrottleSeconds;
     public String alertRecipientEmailAddress;
     // TODO(b/279671974): remove below field after migration
     public String newAlertRecipientEmailAddress;
     public String spec11OutgoingEmailAddress;
     public List<String> spec11BccEmailAddresses;
     public int transientFailureRetries;
-  }
-
-  /** Configuration for keyrings (used to store secrets outside of source). */
-  public static class Keyring {
-    public String activeKeyring;
   }
 
   /** Configuration options for the registry tool. */
@@ -262,5 +254,22 @@ public class RegistryConfigSettings {
     public String bulkPricingPackageDomainLimitWarningEmailBody;
     public String bulkPricingPackageDomainLimitUpgradeEmailSubject;
     public String bulkPricingPackageDomainLimitUpgradeEmailBody;
+  }
+
+  /** Configurations for integration with Brand Safety Alliance (BSA) API. */
+  public static class Bsa {
+    public String bsaChecksumAlgorithm;
+    public int bsaLockLeaseExpiryMinutes;
+    public int bsaDownloadIntervalMinutes;
+    public int bsaMaxNopIntervalHours;
+    public int bsaTxnBatchSize;
+    public int domainCreateTxnCommitTimeLagSeconds;
+    public int bsaValidationMaxStalenessSeconds;
+    public String authUrl;
+    public int authTokenExpirySeconds;
+    public Map<String, String> dataUrls;
+    public String orderStatusUrl;
+    public String unblockableDomainsUrl;
+    public String uploadUnavailableDomainsUrl;
   }
 }

@@ -15,9 +15,11 @@
 package google.registry.request;
 
 import com.google.common.net.MediaType;
+import jakarta.servlet.http.Cookie;
+import jakarta.servlet.http.HttpServletResponse;
 import java.io.IOException;
+import java.io.PrintWriter;
 import javax.inject.Inject;
-import javax.servlet.http.HttpServletResponse;
 import org.joda.time.DateTime;
 
 /** HTTP response object. */
@@ -28,6 +30,11 @@ public final class ResponseImpl implements Response {
   @Inject
   public ResponseImpl(HttpServletResponse rsp) {
     this.rsp = rsp;
+  }
+
+  @Override
+  public void sendRedirect(String url) throws IOException {
+    rsp.sendRedirect(url);
   }
 
   @Override
@@ -57,5 +64,15 @@ public final class ResponseImpl implements Response {
   @Override
   public void setDateHeader(String header, DateTime timestamp) {
     rsp.setDateHeader(header, timestamp.getMillis());
+  }
+
+  @Override
+  public void addCookie(Cookie cookie) {
+    rsp.addCookie(cookie);
+  }
+
+  @Override
+  public PrintWriter getWriter() throws IOException {
+    return rsp.getWriter();
   }
 }

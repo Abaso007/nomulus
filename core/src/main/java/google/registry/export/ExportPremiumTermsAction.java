@@ -18,9 +18,9 @@ import static com.google.common.base.Preconditions.checkState;
 import static com.google.common.base.Strings.isNullOrEmpty;
 import static com.google.common.net.MediaType.PLAIN_TEXT_UTF_8;
 import static google.registry.request.Action.Method.POST;
+import static jakarta.servlet.http.HttpServletResponse.SC_INTERNAL_SERVER_ERROR;
+import static jakarta.servlet.http.HttpServletResponse.SC_OK;
 import static java.nio.charset.StandardCharsets.UTF_8;
-import static javax.servlet.http.HttpServletResponse.SC_INTERNAL_SERVER_ERROR;
-import static javax.servlet.http.HttpServletResponse.SC_OK;
 
 import com.google.common.base.Joiner;
 import com.google.common.collect.ImmutableList;
@@ -33,6 +33,7 @@ import google.registry.model.tld.Tld;
 import google.registry.model.tld.label.PremiumList.PremiumEntry;
 import google.registry.model.tld.label.PremiumListDao;
 import google.registry.request.Action;
+import google.registry.request.Action.GaeService;
 import google.registry.request.Parameter;
 import google.registry.request.RequestParameters;
 import google.registry.request.Response;
@@ -45,15 +46,16 @@ import javax.inject.Inject;
 
 /** Action that exports the premium terms list for a TLD to Google Drive. */
 @Action(
-    service = Action.Service.BACKEND,
+    service = GaeService.BACKEND,
     path = "/_dr/task/exportPremiumTerms",
     method = POST,
-    auth = Auth.AUTH_API_ADMIN)
+    auth = Auth.AUTH_ADMIN)
 public class ExportPremiumTermsAction implements Runnable {
 
   private static final FluentLogger logger = FluentLogger.forEnclosingClass();
   static final MediaType EXPORT_MIME_TYPE = MediaType.PLAIN_TEXT_UTF_8;
-  static final String PREMIUM_TERMS_FILENAME = "CONFIDENTIAL_premium_terms.txt";
+  static final String TLD_IDENTIFIER_FORMAT = "# TLD: %s";
+  static final String PREMIUM_TERMS_FILENAME_FORMAT = "CONFIDENTIAL_premium_terms_%s.txt";
 
   @Inject DriveConnection driveConnection;
 
@@ -115,7 +117,7 @@ public class ExportPremiumTermsAction implements Runnable {
           "Skipping premium terms export for TLD %s because Drive folder isn't specified.", tldStr);
       return Optional.of("Skipping export because no Drive folder is associated with this TLD");
     }
-    if (!tld.getPremiumListName().isPresent()) {
+    if (tld.getPremiumListName().isEmpty()) {
       logger.atInfo().log("No premium terms to export for TLD '%s'.", tldStr);
       return Optional.of("No premium lists configured");
     }
@@ -126,7 +128,7 @@ public class ExportPremiumTermsAction implements Runnable {
     try {
       String fileId =
           driveConnection.createOrUpdateFile(
-              PREMIUM_TERMS_FILENAME,
+              String.format(PREMIUM_TERMS_FILENAME_FORMAT, tldStr),
               EXPORT_MIME_TYPE,
               tld.getDriveFolderId(),
               getFormattedPremiumTerms(tld).getBytes(UTF_8));
@@ -149,11 +151,9 @@ public class ExportPremiumTermsAction implements Runnable {
             .map(PremiumEntry::toString)
             .collect(ImmutableSortedSet.toImmutableSortedSet(String::compareTo));
 
-    return Joiner.on("\n")
-        .appendTo(
-            new StringBuilder(),
-            Iterables.concat(ImmutableList.of(exportDisclaimer.trim()), premiumTerms))
-        .append("\n")
-        .toString();
+    String tldIdentifier = String.format(TLD_IDENTIFIER_FORMAT, tldStr);
+    Iterable<String> commentsAndTerms =
+        Iterables.concat(ImmutableList.of(exportDisclaimer.trim(), tldIdentifier), premiumTerms);
+    return Joiner.on("\n").join(commentsAndTerms) + "\n";
   }
 }

@@ -36,7 +36,6 @@ import google.registry.model.domain.fee.FeeQueryCommandExtensionItem.CommandName
 import google.registry.model.domain.token.AllocationToken;
 import google.registry.model.domain.token.AllocationToken.TokenBehavior;
 import google.registry.model.domain.token.AllocationToken.TokenStatus;
-import google.registry.model.domain.token.AllocationToken.TokenType;
 import google.registry.model.domain.token.AllocationTokenExtension;
 import google.registry.model.reporting.HistoryEntry.HistoryEntryId;
 import google.registry.model.tld.Tld;
@@ -70,9 +69,8 @@ public class AllocationTokenFlowUtils {
     try {
       tokenEntity = loadToken(token);
     } catch (EppException e) {
-      return AllocationTokenDomainCheckResults.create(
-          Optional.empty(),
-          ImmutableMap.copyOf(Maps.toMap(domainNames, ignored -> e.getMessage())));
+      return new AllocationTokenDomainCheckResults(
+          Optional.empty(), Maps.toMap(domainNames, ignored -> e.getMessage()));
     }
 
     // If the token is only invalid for some domain names (e.g. an invalid TLD), include those error
@@ -98,15 +96,13 @@ public class AllocationTokenFlowUtils {
     resultsBuilder.putAll(
         tokenCustomLogic.checkDomainsWithToken(
             validDomainNames.build(), tokenEntity, registrarId, now));
-    return AllocationTokenDomainCheckResults.create(
-        Optional.of(tokenEntity), resultsBuilder.build());
+    return new AllocationTokenDomainCheckResults(Optional.of(tokenEntity), resultsBuilder.build());
   }
 
   /** Redeems a SINGLE_USE {@link AllocationToken}, returning the redeemed copy. */
   public AllocationToken redeemToken(AllocationToken token, HistoryEntryId redemptionHistoryId) {
     checkArgument(
-        TokenType.SINGLE_USE.equals(token.getTokenType()),
-        "Only SINGLE_USE tokens can be marked as redeemed");
+        token.getTokenType().isOneTimeUse(), "Only SINGLE_USE tokens can be marked as redeemed");
     return token.asBuilder().setRedemptionHistoryId(redemptionHistoryId).build();
   }
 
@@ -160,7 +156,7 @@ public class AllocationTokenFlowUtils {
       Optional<AllocationToken> token, boolean isPremium)
       throws AllocationTokenInvalidForPremiumNameException {
     if (token.isPresent()
-        && token.get().getDiscountFraction() != 0.0
+        && (token.get().getDiscountFraction() != 0.0 || token.get().getDiscountPrice().isPresent())
         && isPremium
         && !token.get().shouldDiscountPremiums()) {
       throw new AllocationTokenInvalidForPremiumNameException();
@@ -181,10 +177,11 @@ public class AllocationTokenFlowUtils {
       return maybeTokenEntity.get();
     }
 
+    // TODO(b/368069206): `reTransact` needed by tests only.
     maybeTokenEntity =
-        tm().transact(() -> tm().loadByKeyIfPresent(VKey.create(AllocationToken.class, token)));
+        tm().reTransact(() -> tm().loadByKeyIfPresent(VKey.create(AllocationToken.class, token)));
 
-    if (!maybeTokenEntity.isPresent()) {
+    if (maybeTokenEntity.isEmpty()) {
       throw new InvalidAllocationTokenException();
     }
     if (maybeTokenEntity.get().isRedeemed()) {
@@ -201,7 +198,7 @@ public class AllocationTokenFlowUtils {
       DateTime now,
       Optional<AllocationTokenExtension> extension)
       throws EppException {
-    if (!extension.isPresent()) {
+    if (extension.isEmpty()) {
       return Optional.empty();
     }
     AllocationToken tokenEntity = loadToken(extension.get().getAllocationToken());
@@ -224,7 +221,7 @@ public class AllocationTokenFlowUtils {
       CommandName commandName,
       Optional<AllocationTokenExtension> extension)
       throws EppException {
-    if (!extension.isPresent()) {
+    if (extension.isEmpty()) {
       return Optional.empty();
     }
     AllocationToken tokenEntity = loadToken(extension.get().getAllocationToken());
@@ -243,21 +240,21 @@ public class AllocationTokenFlowUtils {
       Domain domain, Optional<AllocationToken> allocationToken) throws EppException {
 
     boolean domainHasBulkToken = domain.getCurrentBulkToken().isPresent();
-    boolean hasRemoveDomainToken =
+    boolean hasRemoveBulkPricingToken =
         allocationToken.isPresent()
-            && TokenBehavior.REMOVE_DOMAIN.equals(allocationToken.get().getTokenBehavior());
+            && TokenBehavior.REMOVE_BULK_PRICING.equals(allocationToken.get().getTokenBehavior());
 
-    if (hasRemoveDomainToken && !domainHasBulkToken) {
-      throw new RemoveDomainTokenOnNonBulkPricingDomainException();
-    } else if (!hasRemoveDomainToken && domainHasBulkToken) {
-      throw new MissingRemoveDomainTokenOnBulkPricingDomainException();
+    if (hasRemoveBulkPricingToken && !domainHasBulkToken) {
+      throw new RemoveBulkPricingTokenOnNonBulkPricingDomainException();
+    } else if (!hasRemoveBulkPricingToken && domainHasBulkToken) {
+      throw new MissingRemoveBulkPricingTokenOnBulkPricingDomainException();
     }
   }
 
   public static Domain maybeApplyBulkPricingRemovalToken(
       Domain domain, Optional<AllocationToken> allocationToken) {
-    if (!allocationToken.isPresent()
-        || !TokenBehavior.REMOVE_DOMAIN.equals(allocationToken.get().getTokenBehavior())) {
+    if (allocationToken.isEmpty()
+        || !TokenBehavior.REMOVE_BULK_PRICING.equals(allocationToken.get().getTokenBehavior())) {
       return domain;
     }
 
@@ -291,6 +288,7 @@ public class AllocationTokenFlowUtils {
       super("Alloc token not in promo period");
     }
   }
+
   /** The allocation token is not valid for this TLD. */
   public static class AllocationTokenNotValidForTldException
       extends AssociationProhibitsOperationException {
@@ -338,19 +336,19 @@ public class AllocationTokenFlowUtils {
     }
   }
 
-  /** The __REMOVEDOMAIN__ token is missing on a bulk pricing domain command */
-  public static class MissingRemoveDomainTokenOnBulkPricingDomainException
+  /** The __REMOVE_BULK_PRICING__ token is missing on a bulk pricing domain command */
+  public static class MissingRemoveBulkPricingTokenOnBulkPricingDomainException
       extends AssociationProhibitsOperationException {
-    MissingRemoveDomainTokenOnBulkPricingDomainException() {
+    MissingRemoveBulkPricingTokenOnBulkPricingDomainException() {
       super("Domains that are inside bulk pricing cannot be explicitly renewed or transferred");
     }
   }
 
-  /** The __REMOVEDOMAIN__ token is not allowed on non bulk pricing domains */
-  public static class RemoveDomainTokenOnNonBulkPricingDomainException
+  /** The __REMOVE_BULK_PRICING__ token is not allowed on non bulk pricing domains */
+  public static class RemoveBulkPricingTokenOnNonBulkPricingDomainException
       extends AssociationProhibitsOperationException {
-    RemoveDomainTokenOnNonBulkPricingDomainException() {
-      super("__REMOVEDOMAIN__ token is not allowed on non bulk pricing domains");
+    RemoveBulkPricingTokenOnNonBulkPricingDomainException() {
+      super("__REMOVE_BULK_PRICING__ token is not allowed on non bulk pricing domains");
     }
   }
 }

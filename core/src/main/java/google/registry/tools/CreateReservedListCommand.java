@@ -47,19 +47,16 @@ final class CreateReservedListCommand extends CreateOrUpdateReservedListCommand 
   @Override
   protected String prompt() throws Exception {
     name = Strings.isNullOrEmpty(name) ? convertFilePathToName(input) : name;
-    checkArgument(
-        !ReservedList.get(name).isPresent(), "A reserved list already exists by this name");
+    checkArgument(ReservedList.get(name).isEmpty(), "A reserved list already exists by this name");
     if (!override) {
       validateListName(name);
     }
     DateTime now = DateTime.now(UTC);
     List<String> allLines = Files.readAllLines(input, UTF_8);
-    boolean shouldPublish = this.shouldPublish == null || this.shouldPublish;
     reservedList =
         new ReservedList.Builder()
             .setName(name)
             .setReservedListMapFromLines(allLines)
-            .setShouldPublish(shouldPublish)
             .setCreationTimestamp(now)
             .build();
 

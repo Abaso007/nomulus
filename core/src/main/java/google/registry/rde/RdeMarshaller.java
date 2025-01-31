@@ -37,12 +37,13 @@ import google.registry.xjc.rdepolicy.XjcRdePolicyElement;
 import google.registry.xml.ValidationMode;
 import google.registry.xml.XmlException;
 import google.registry.xml.XmlFragmentMarshaller;
+import jakarta.xml.bind.JAXBElement;
+import jakarta.xml.bind.MarshalException;
 import java.io.ByteArrayOutputStream;
+import java.io.Serial;
 import java.io.Serializable;
 import java.util.Collection;
 import javax.annotation.concurrent.NotThreadSafe;
-import javax.xml.bind.JAXBElement;
-import javax.xml.bind.MarshalException;
 import org.joda.time.DateTime;
 
 /** XML document <i>fragment</i> marshaller for RDE. */
@@ -50,7 +51,7 @@ import org.joda.time.DateTime;
 public final class RdeMarshaller implements Serializable {
 
   private static final FluentLogger logger = FluentLogger.forEnclosingClass();
-  private static final long serialVersionUID = 202890386611768455L;
+  @Serial private static final long serialVersionUID = 202890386611768455L;
 
   private final ValidationMode validationMode;
   private transient XmlFragmentMarshaller memoizedMarshaller;
@@ -84,14 +85,15 @@ public final class RdeMarshaller implements Serializable {
     ByteArrayOutputStream os = new ByteArrayOutputStream();
     try {
       XjcXmlTransformer.marshal(deposit, os, UTF_8, validationMode);
+      String rdeDocument = os.toString(UTF_8);
+      String marker = "<rde:contents>\n";
+      int startOfContents = rdeDocument.indexOf(marker);
+      verify(startOfContents > 0, "Bad RDE document:\n%s", rdeDocument);
+      return rdeDocument.substring(0, startOfContents + marker.length());
     } catch (XmlException e) {
       throw new RuntimeException(e);
     }
-    String rdeDocument = os.toString();
-    String marker = "<rde:contents>\n";
-    int startOfContents = rdeDocument.indexOf(marker);
-    verify(startOfContents > 0, "Bad RDE document:\n%s", rdeDocument);
-    return rdeDocument.substring(0, startOfContents + marker.length());
+
   }
 
   /** Returns bottom-portion of XML document. */

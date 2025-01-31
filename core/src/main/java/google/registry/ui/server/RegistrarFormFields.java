@@ -29,6 +29,7 @@ import com.google.re2j.Pattern;
 import google.registry.model.registrar.Registrar;
 import google.registry.model.registrar.RegistrarAddress;
 import google.registry.model.registrar.RegistrarPoc;
+import google.registry.model.registrar.RegistrarPocBase;
 import google.registry.ui.forms.FormException;
 import google.registry.ui.forms.FormField;
 import google.registry.ui.forms.FormFieldException;
@@ -90,12 +91,6 @@ public final class RegistrarFormFields {
           .matches(ASCII_PATTERN, ASCII_ERROR)
           .build();
 
-  public static final FormField<String, Registrar.State> STATE_FIELD =
-      FormField.named("state")
-          .emptyToNull()
-          .asEnum(Registrar.State.class)
-          .build();
-
   public static final FormField<List<String>, Set<String>> ALLOWED_TLDS_FIELD =
       FormFields.LABEL.asBuilderNamed("allowedTlds")
           .asSet()
@@ -104,14 +99,6 @@ public final class RegistrarFormFields {
   public static final FormField<String, String> WHOIS_SERVER_FIELD =
       FormFields.LABEL.asBuilderNamed("whoisServer")
           .transform(RegistrarFormFields::parseHostname)
-          .build();
-
-  public static final FormField<Boolean, Boolean> BLOCK_PREMIUM_NAMES_FIELD =
-      FormField.named("blockPremiumNames", Boolean.class)
-          .build();
-
-  public static final FormField<String, String> DRIVE_FOLDER_ID_FIELD =
-      FormFields.XS_NORMALIZED_STRING.asBuilderNamed("driveFolderId")
           .build();
 
   public static final FormField<String, String> CLIENT_CERTIFICATE_HASH_FIELD =
@@ -206,9 +193,6 @@ public final class RegistrarFormFields {
   public static final FormField<String, String> CONTACT_FAX_NUMBER_FIELD =
       FormFields.PHONE_NUMBER.asBuilderNamed("faxNumber").build();
 
-  public static final FormField<String, String> CONTACT_LOGIN_EMAIL_ADDRESS_FIELD =
-      FormFields.NAME.asBuilderNamed("loginEmailAddress").build();
-
   public static final FormField<Object, Boolean> CONTACT_ALLOWED_TO_SET_REGISTRY_LOCK_PASSWORD =
       FormField.named("allowedToSetRegistryLockPassword", Object.class)
           .transform(Boolean.class, b -> Boolean.valueOf(Objects.toString(b)))
@@ -217,10 +201,10 @@ public final class RegistrarFormFields {
   public static final FormField<String, String> CONTACT_REGISTRY_LOCK_PASSWORD_FIELD =
       FormFields.NAME.asBuilderNamed("registryLockPassword").build();
 
-  public static final FormField<String, Set<RegistrarPoc.Type>> CONTACT_TYPES =
+  public static final FormField<String, Set<RegistrarPocBase.Type>> CONTACT_TYPES =
       FormField.named("types")
           .uppercased()
-          .asEnum(RegistrarPoc.Type.class)
+          .asEnum(RegistrarPocBase.Type.class)
           .asSet(Splitter.on(',').omitEmptyStrings().trimResults())
           .build();
 
@@ -360,7 +344,7 @@ public final class RegistrarFormFields {
       return ImmutableList.of();
     }
     Optional<List<Map<String, ?>>> contactsAsMaps = CONTACTS_AS_MAPS.extractUntyped(args);
-    if (!contactsAsMaps.isPresent()) {
+    if (contactsAsMaps.isEmpty()) {
       return ImmutableList.of();
     }
     ImmutableList.Builder<RegistrarPoc.Builder> result = new ImmutableList.Builder<>();
@@ -397,8 +381,6 @@ public final class RegistrarFormFields {
     builder.setPhoneNumber(CONTACT_PHONE_NUMBER_FIELD.extractUntyped(args).orElse(null));
     builder.setFaxNumber(CONTACT_FAX_NUMBER_FIELD.extractUntyped(args).orElse(null));
     builder.setTypes(CONTACT_TYPES.extractUntyped(args).orElse(ImmutableSet.of()));
-    builder.setLoginEmailAddress(
-        CONTACT_LOGIN_EMAIL_ADDRESS_FIELD.extractUntyped(args).orElse(null));
     // The parser is inconsistent with whether it retrieves boolean values as strings or booleans.
     // As a result, use a potentially-redundant converter that can deal with both.
     builder.setAllowedToSetRegistryLockPassword(

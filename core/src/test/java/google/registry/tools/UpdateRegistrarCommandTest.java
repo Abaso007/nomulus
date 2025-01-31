@@ -15,7 +15,6 @@
 package google.registry.tools;
 
 import static com.google.common.truth.Truth.assertThat;
-import static com.google.common.truth.Truth8.assertThat;
 import static google.registry.testing.CertificateSamples.SAMPLE_CERT;
 import static google.registry.testing.CertificateSamples.SAMPLE_CERT3;
 import static google.registry.testing.CertificateSamples.SAMPLE_CERT3_HASH;
@@ -38,8 +37,8 @@ import com.google.common.collect.ImmutableSortedMap;
 import google.registry.flows.certs.CertificateChecker;
 import google.registry.flows.certs.CertificateChecker.InsecureCertificateException;
 import google.registry.model.registrar.Registrar;
-import google.registry.model.registrar.Registrar.State;
-import google.registry.model.registrar.Registrar.Type;
+import google.registry.model.registrar.RegistrarBase.State;
+import google.registry.model.registrar.RegistrarBase.Type;
 import google.registry.persistence.transaction.JpaTransactionManagerExtension;
 import google.registry.util.CidrAddressBlock;
 import java.math.BigDecimal;
@@ -415,7 +414,7 @@ class UpdateRegistrarCommandTest extends CommandTestCase<UpdateRegistrarCommand>
             .asBuilder()
             .setBillingAccountMap(ImmutableMap.of(USD, "abc123", JPY, "789xyz"))
             .build());
-    runCommand("--billing_account_map=\"\"", "--force", "NewRegistrar");
+    runCommand("--billing_account_map=", "--force", "NewRegistrar");
     assertThat(loadRegistrar("NewRegistrar").getBillingAccountMap()).isEmpty();
   }
 
@@ -450,7 +449,8 @@ class UpdateRegistrarCommandTest extends CommandTestCase<UpdateRegistrarCommand>
         newTld("foo", "FOO")
             .asBuilder()
             .setCurrency(JPY)
-            .setCreateBillingCost(Money.of(JPY, new BigDecimal(1300)))
+            .setCreateBillingCostTransitions(
+                ImmutableSortedMap.of(START_OF_TIME, Money.of(JPY, new BigDecimal(1300))))
             .setRestoreBillingCost(Money.of(JPY, new BigDecimal(1700)))
             .setServerStatusChangeBillingCost(Money.of(JPY, new BigDecimal(1900)))
             .setRegistryLockOrUnlockBillingCost(Money.of(JPY, new BigDecimal(2700)))
@@ -482,9 +482,9 @@ class UpdateRegistrarCommandTest extends CommandTestCase<UpdateRegistrarCommand>
   @Test
   void testSuccess_streetAddress() throws Exception {
     runCommand(
-        "--street=\"1234 Main St\"",
-        "--street \"4th Floor\"",
-        "--street \"Suite 1\"",
+        "--street=1234 Main St",
+        "--street 4th Floor",
+        "--street Suite 1",
         "--city Brooklyn",
         "--state NY",
         "--zip 11223",
@@ -637,10 +637,12 @@ class UpdateRegistrarCommandTest extends CommandTestCase<UpdateRegistrarCommand>
 
   @Test
   void testSuccess_setIcannEmail() throws Exception {
-    runCommand("--icann_referral_email=foo@bar.test", "--force", "TheRegistrar");
     Registrar registrar = loadRegistrar("TheRegistrar");
-    assertThat(registrar.getIcannReferralEmail()).isEqualTo("foo@bar.test");
-    assertThat(registrar.getEmailAddress()).isEqualTo("foo@bar.test");
+    assertThat(registrar.getEmailAddress()).isEqualTo("the.registrar@example.com");
+    runCommand("--icann_referral_email=foo@bar.test", "--force", "TheRegistrar");
+    Registrar updatedRegistrar = loadRegistrar("TheRegistrar");
+    assertThat(updatedRegistrar.getIcannReferralEmail()).isEqualTo("foo@bar.test");
+    assertThat(updatedRegistrar.getEmailAddress()).isEqualTo("the.registrar@example.com");
   }
 
   @Test
@@ -900,7 +902,7 @@ class UpdateRegistrarCommandTest extends CommandTestCase<UpdateRegistrarCommand>
   @Test
   void testFailure_tooFewStreetLines() {
     assertThrows(
-        IllegalArgumentException.class,
+        ParameterException.class,
         () ->
             runCommand(
                 "--street",
@@ -915,7 +917,7 @@ class UpdateRegistrarCommandTest extends CommandTestCase<UpdateRegistrarCommand>
   @Test
   void testFailure_unknownFlag() {
     assertThrows(
-        ParameterException.class,
+        IllegalArgumentException.class,
         () -> runCommand("--force", "--unrecognized_flag=foo", "NewRegistrar"));
   }
 

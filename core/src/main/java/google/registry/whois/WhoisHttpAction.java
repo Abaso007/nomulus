@@ -22,9 +22,9 @@ import static com.google.common.net.HttpHeaders.EXPIRES;
 import static com.google.common.net.HttpHeaders.LAST_MODIFIED;
 import static com.google.common.net.HttpHeaders.X_CONTENT_TYPE_OPTIONS;
 import static com.google.common.net.MediaType.PLAIN_TEXT_UTF_8;
-import static javax.servlet.http.HttpServletResponse.SC_BAD_REQUEST;
-import static javax.servlet.http.HttpServletResponse.SC_INTERNAL_SERVER_ERROR;
-import static javax.servlet.http.HttpServletResponse.SC_OK;
+import static jakarta.servlet.http.HttpServletResponse.SC_BAD_REQUEST;
+import static jakarta.servlet.http.HttpServletResponse.SC_INTERNAL_SERVER_ERROR;
+import static jakarta.servlet.http.HttpServletResponse.SC_OK;
 
 import com.google.common.base.Joiner;
 import com.google.common.base.Splitter;
@@ -32,6 +32,7 @@ import com.google.common.base.Throwables;
 import com.google.common.flogger.FluentLogger;
 import google.registry.config.RegistryConfig.Config;
 import google.registry.request.Action;
+import google.registry.request.Action.GaeService;
 import google.registry.request.RequestPath;
 import google.registry.request.Response;
 import google.registry.request.auth.Auth;
@@ -94,7 +95,7 @@ import org.joda.time.Duration;
  * @see WhoisAction
  */
 @Action(
-    service = Action.Service.PUBAPI,
+    service = GaeService.PUBAPI,
     path = WhoisHttpAction.PATH,
     isPrefix = true,
     auth = Auth.AUTH_PUBLIC)

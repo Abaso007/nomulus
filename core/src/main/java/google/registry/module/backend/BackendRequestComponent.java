@@ -26,7 +26,6 @@ import google.registry.batch.RelockDomainAction;
 import google.registry.batch.ResaveAllEppResourcesPipelineAction;
 import google.registry.batch.ResaveEntityAction;
 import google.registry.batch.SendExpiringCertificateNotificationEmailAction;
-import google.registry.batch.WipeOutCloudSqlAction;
 import google.registry.batch.WipeOutContactHistoryPiiAction;
 import google.registry.cron.CronModule;
 import google.registry.cron.TldFanoutAction;
@@ -60,7 +59,7 @@ import google.registry.reporting.billing.BillingModule;
 import google.registry.reporting.billing.CopyDetailReportsAction;
 import google.registry.reporting.billing.GenerateInvoicesAction;
 import google.registry.reporting.billing.PublishInvoicesAction;
-import google.registry.reporting.icann.DnsCountQueryCoordinatorModule;
+import google.registry.reporting.icann.DnsCountQueryCoordinator.DnsCountQueryCoordinatorModule;
 import google.registry.reporting.icann.IcannReportingModule;
 import google.registry.reporting.icann.IcannReportingStagingAction;
 import google.registry.reporting.icann.IcannReportingUploadAction;
@@ -100,7 +99,7 @@ import google.registry.tmch.TmchSmdrlAction;
       VoidDnsWriterModule.class,
       WhiteboxModule.class,
     })
-interface BackendRequestComponent {
+public interface BackendRequestComponent {
 
   BrdaCopyAction brdaCopyAction();
 
@@ -177,8 +176,6 @@ interface BackendRequestComponent {
   TmchSmdrlAction tmchSmdrlAction();
 
   UpdateRegistrarRdapBaseUrlsAction updateRegistrarRdapBaseUrlsAction();
-
-  WipeOutCloudSqlAction wipeOutCloudSqlAction();
 
   WipeOutContactHistoryPiiAction wipeOutContactHistoryPiiAction();
 

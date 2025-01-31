@@ -15,10 +15,11 @@
 package google.registry.tools;
 
 import static com.google.common.truth.Truth.assertThat;
-import static google.registry.model.registrar.RegistrarPoc.Type.ABUSE;
-import static google.registry.model.registrar.RegistrarPoc.Type.ADMIN;
-import static google.registry.model.registrar.RegistrarPoc.Type.TECH;
-import static google.registry.model.registrar.RegistrarPoc.Type.WHOIS;
+import static google.registry.model.registrar.RegistrarPocBase.Type.ABUSE;
+import static google.registry.model.registrar.RegistrarPocBase.Type.ADMIN;
+import static google.registry.model.registrar.RegistrarPocBase.Type.TECH;
+import static google.registry.model.registrar.RegistrarPocBase.Type.WHOIS;
+import static google.registry.persistence.transaction.TransactionManagerFactory.tm;
 import static google.registry.testing.DatabaseHelper.loadRegistrar;
 import static google.registry.testing.DatabaseHelper.persistResource;
 import static google.registry.testing.DatabaseHelper.persistSimpleResource;
@@ -49,16 +50,18 @@ class RegistrarPocCommandTest extends CommandTestCase<RegistrarPocCommand> {
   @Test
   void testList() throws Exception {
     Registrar registrar = loadRegistrar("NewRegistrar");
-    RegistrarPoc.updateContacts(
-        registrar,
-        ImmutableSet.of(
-            new RegistrarPoc.Builder()
-                .setRegistrar(registrar)
-                .setName("John Doe")
-                .setEmailAddress("john.doe@example.com")
-                .setTypes(ImmutableSet.of(ADMIN))
-                .setVisibleInWhoisAsAdmin(true)
-                .build()));
+    tm().transact(
+            () ->
+                RegistrarPoc.updateContacts(
+                    registrar,
+                    ImmutableSet.of(
+                        new RegistrarPoc.Builder()
+                            .setRegistrar(registrar)
+                            .setName("John Doe")
+                            .setEmailAddress("john.doe@example.com")
+                            .setTypes(ImmutableSet.of(ADMIN))
+                            .setVisibleInWhoisAsAdmin(true)
+                            .build())));
     runCommandForced("--mode=LIST", "--output=" + output, "NewRegistrar");
     assertThat(Files.readAllLines(Paths.get(output), UTF_8))
         .containsExactly(
@@ -68,8 +71,7 @@ class RegistrarPocCommandTest extends CommandTestCase<RegistrarPocCommand> {
             "Visible in registrar WHOIS query as Admin contact: Yes",
             "Visible in registrar WHOIS query as Technical contact: No",
             "Phone number and email visible in domain WHOIS query as "
-                + "Registrar Abuse contact info: No",
-            "Registrar-Console access: No");
+                + "Registrar Abuse contact info: No");
   }
 
   @Test
@@ -114,69 +116,6 @@ class RegistrarPocCommandTest extends CommandTestCase<RegistrarPocCommand> {
                 .setVisibleInWhoisAsTech(false)
                 .setVisibleInDomainWhoisAsAbuse(false)
                 .build());
-  }
-
-  @Test
-  void testUpdate_enableConsoleAccess() throws Exception {
-    Registrar registrar = loadRegistrar("NewRegistrar");
-    persistSimpleResource(
-        new RegistrarPoc.Builder()
-            .setRegistrar(registrar)
-            .setName("Jane Doe")
-            .setEmailAddress("jane.doe@example.com")
-            .build());
-    runCommandForced(
-        "--mode=UPDATE",
-        "--email=jane.doe@example.com",
-        "--allow_console_access=true",
-        "NewRegistrar");
-    RegistrarPoc registrarPoc =
-        loadRegistrar("NewRegistrar").getContacts().stream()
-            .filter(rc -> "jane.doe@example.com".equals(rc.getEmailAddress()))
-            .findFirst()
-            .get();
-    assertThat(registrarPoc.getLoginEmailAddress()).isEqualTo("jane.doe@example.com");
-  }
-
-  @Test
-  void testUpdate_enableConsoleAccess_specifyLoginEmail() throws Exception {
-    Registrar registrar = loadRegistrar("NewRegistrar");
-    persistSimpleResource(
-        new RegistrarPoc.Builder()
-            .setRegistrar(registrar)
-            .setName("Jane Doe")
-            .setEmailAddress("jane.doe@example.com")
-            .build());
-    runCommandForced(
-        "--mode=UPDATE",
-        "--email=jane.doe@example.com",
-        "--login_email=jim.doe@example.com",
-        "--allow_console_access=true",
-        "NewRegistrar");
-    RegistrarPoc registrarPoc =
-        loadRegistrar("NewRegistrar").getContacts().stream()
-            .filter(rc -> "jane.doe@example.com".equals(rc.getEmailAddress()))
-            .findFirst()
-            .get();
-    assertThat(registrarPoc.getLoginEmailAddress()).isEqualTo("jim.doe@example.com");
-  }
-
-  @Test
-  void testUpdate_disableConsoleAccess() throws Exception {
-    Registrar registrar = loadRegistrar("NewRegistrar");
-    persistSimpleResource(
-        new RegistrarPoc.Builder()
-            .setRegistrar(registrar)
-            .setName("Judith Doe")
-            .setEmailAddress("judith.doe@example.com")
-            .build());
-    runCommandForced(
-        "--mode=UPDATE",
-        "--email=judith.doe@example.com",
-        "--allow_console_access=false",
-        "NewRegistrar");
-    RegistrarPoc registrarPoc = loadRegistrar("NewRegistrar").getContacts().asList().get(1);
-    assertThat(registrarPoc.getLoginEmailAddress()).isNull();
   }
 
   @Test
@@ -334,7 +273,6 @@ class RegistrarPocCommandTest extends CommandTestCase<RegistrarPocCommand> {
                 .setVisibleInWhoisAsTech(false)
                 .setVisibleInDomainWhoisAsAbuse(true)
                 .build());
-    assertThat(registrarPoc.getLoginEmailAddress()).isNull();
   }
 
   @Test
@@ -346,7 +284,7 @@ class RegistrarPocCommandTest extends CommandTestCase<RegistrarPocCommand> {
 
   @Test
   void testDelete_failsOnDomainWhoisAbuseContact() {
-    RegistrarPoc registrarPoc = loadRegistrar("NewRegistrar").getContacts().asList().get(0);
+    RegistrarPoc registrarPoc = loadRegistrar("NewRegistrar").getContacts().asList().getFirst();
     putInDb(registrarPoc.asBuilder().setVisibleInDomainWhoisAsAbuse(true).build());
     IllegalArgumentException thrown =
         assertThrows(
@@ -356,33 +294,6 @@ class RegistrarPocCommandTest extends CommandTestCase<RegistrarPocCommand> {
                     "--mode=DELETE", "--email=janedoe@theregistrar.com", "NewRegistrar"));
     assertThat(thrown).hasMessageThat().contains("Cannot delete the domain WHOIS abuse contact");
     assertThat(loadRegistrar("NewRegistrar").getContacts()).isNotEmpty();
-  }
-
-  @Test
-  void testCreate_withConsoleAccessEnabled() throws Exception {
-    runCommandForced(
-        "--mode=CREATE",
-        "--name=Jim Doe",
-        "--email=jim.doe@example.com",
-        "--allow_console_access=true",
-        "--contact_type=ADMIN,ABUSE",
-        "NewRegistrar");
-    RegistrarPoc registrarPoc = loadRegistrar("NewRegistrar").getContacts().asList().get(1);
-    assertThat(registrarPoc.getEmailAddress()).isEqualTo("jim.doe@example.com");
-  }
-
-  @Test
-  void testCreate_withConsoleAccessEnabled_specifyLoginEmail() throws Exception {
-    runCommandForced(
-        "--mode=CREATE",
-        "--name=Jim Doe",
-        "--email=jim.doe@example.com",
-        "--login_email=jane.doe@example.com",
-        "--allow_console_access=true",
-        "--contact_type=ADMIN,ABUSE",
-        "NewRegistrar");
-    RegistrarPoc registrarPoc = loadRegistrar("NewRegistrar").getContacts().asList().get(1);
-    assertThat(registrarPoc.getLoginEmailAddress()).isEqualTo("jane.doe@example.com");
   }
 
   @Test

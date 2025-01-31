@@ -14,7 +14,6 @@
 
 package google.registry.flows.domain;
 
-import static com.google.common.base.Preconditions.checkArgument;
 import static com.google.common.collect.ImmutableSet.toImmutableSet;
 import static google.registry.dns.DnsUtils.requestDomainDnsRefresh;
 import static google.registry.flows.FlowUtils.persistEntityChanges;
@@ -40,12 +39,12 @@ import static google.registry.flows.domain.DomainFlowUtils.verifyClaimsNoticeIfA
 import static google.registry.flows.domain.DomainFlowUtils.verifyClaimsPeriodNotEnded;
 import static google.registry.flows.domain.DomainFlowUtils.verifyLaunchPhaseMatchesRegistryPhase;
 import static google.registry.flows.domain.DomainFlowUtils.verifyNoCodeMarks;
+import static google.registry.flows.domain.DomainFlowUtils.verifyNotBlockedByBsa;
 import static google.registry.flows.domain.DomainFlowUtils.verifyNotReserved;
 import static google.registry.flows.domain.DomainFlowUtils.verifyPremiumNameIsNotBlocked;
 import static google.registry.flows.domain.DomainFlowUtils.verifyRegistrarIsActive;
 import static google.registry.flows.domain.DomainFlowUtils.verifyUnitIsYears;
 import static google.registry.model.EppResourceUtils.createDomainRepoId;
-import static google.registry.model.IdService.allocateId;
 import static google.registry.model.eppcommon.StatusValue.SERVER_HOLD;
 import static google.registry.model.reporting.HistoryEntry.Type.DOMAIN_CREATE;
 import static google.registry.model.tld.Tld.TldState.GENERAL_AVAILABILITY;
@@ -56,10 +55,10 @@ import static google.registry.persistence.transaction.TransactionManagerFactory.
 import static google.registry.util.DateTimeUtils.END_OF_TIME;
 import static google.registry.util.DateTimeUtils.leapSafeAddYears;
 
-import com.google.auto.value.AutoValue;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableSet;
 import com.google.common.net.InternetDomainName;
+import google.registry.config.RegistryConfig;
 import google.registry.flows.EppException;
 import google.registry.flows.EppException.CommandUseErrorException;
 import google.registry.flows.EppException.ParameterValuePolicyErrorException;
@@ -120,9 +119,7 @@ import google.registry.model.tmch.ClaimsList;
 import google.registry.model.tmch.ClaimsListDao;
 import google.registry.tmch.LordnTaskUtils.LordnPhase;
 import java.util.Optional;
-import javax.annotation.Nullable;
 import javax.inject.Inject;
-import org.joda.money.Money;
 import org.joda.time.DateTime;
 import org.joda.time.Duration;
 
@@ -168,6 +165,7 @@ import org.joda.time.Duration;
  * @error {@link DomainFlowUtils.CurrencyUnitMismatchException}
  * @error {@link DomainFlowUtils.CurrencyValueScaleException}
  * @error {@link DomainFlowUtils.DashesInThirdAndFourthException}
+ * @error {@link DomainFlowUtils.DomainLabelBlockedByBsaException}
  * @error {@link DomainFlowUtils.DomainLabelTooLongException}
  * @error {@link DomainFlowUtils.DomainReservedException}
  * @error {@link DomainFlowUtils.DuplicateContactForRoleException}
@@ -265,7 +263,6 @@ public final class DomainCreateFlow implements MutatingFlow {
       validateLaunchCreateNotice(launchCreate.get().getNotice(), domainLabel, isSuperuser, now);
     }
     boolean isSunriseCreate = hasSignedMarks && (tldState == START_DATE_SUNRISE);
-    // TODO(sarahbot@): Add check for valid EPP actions on the token
     Optional<AllocationToken> allocationToken =
         allocationTokenFlowUtils.verifyAllocationTokenCreateIfPresent(
             command,
@@ -274,7 +271,7 @@ public final class DomainCreateFlow implements MutatingFlow {
             now,
             eppInput.getSingleExtension(AllocationTokenExtension.class));
     boolean defaultTokenUsed = false;
-    if (!allocationToken.isPresent()) {
+    if (allocationToken.isEmpty()) {
       allocationToken =
           DomainFlowUtils.checkForDefaultToken(
               tld, command.getDomainName(), CommandName.CREATE, registrarId, now);
@@ -328,6 +325,7 @@ public final class DomainCreateFlow implements MutatingFlow {
               .verifySignedMarks(launchCreate.get().getSignedMarks(), domainLabel, now)
               .getId();
     }
+    verifyNotBlockedByBsa(domainName, tld, now, allocationToken);
     flowCustomLogic.afterValidation(
         DomainCreateFlowCustomLogic.AfterValidationParameters.newBuilder()
             .setDomainName(domainName)
@@ -343,8 +341,8 @@ public final class DomainCreateFlow implements MutatingFlow {
     Optional<SecDnsCreateExtension> secDnsCreate =
         validateSecDnsExtension(eppInput.getSingleExtension(SecDnsCreateExtension.class));
     DateTime registrationExpirationTime = leapSafeAddYears(now, years);
-    String repoId = createDomainRepoId(allocateId(), tld.getTldStr());
-    long historyRevisionId = allocateId();
+    String repoId = createDomainRepoId(tm().allocateId(), tld.getTldStr());
+    long historyRevisionId = tm().allocateId();
     HistoryEntryId domainHistoryId = new HistoryEntryId(repoId, historyRevisionId);
     historyBuilder.setRevisionId(historyRevisionId);
     // Bill for the create.
@@ -362,9 +360,7 @@ public final class DomainCreateFlow implements MutatingFlow {
     // Create a new autorenew billing event and poll message starting at the expiration time.
     BillingRecurrence autorenewBillingEvent =
         createAutorenewBillingEvent(
-            domainHistoryId,
-            registrationExpirationTime,
-            getRenewalPriceInfo(isAnchorTenant, allocationToken, feesAndCredits));
+            domainHistoryId, registrationExpirationTime, isAnchorTenant, allocationToken);
     PollMessage.Autorenew autorenewPollMessage =
         createAutorenewPollMessage(domainHistoryId, registrationExpirationTime);
     ImmutableSet.Builder<ImmutableObject> entitiesToSave = new ImmutableSet.Builder<>();
@@ -418,8 +414,7 @@ public final class DomainCreateFlow implements MutatingFlow {
           createNameCollisionOneTimePollMessage(targetId, domainHistory, registrarId, now));
     }
     entitiesToSave.add(domain, domainHistory);
-    if (allocationToken.isPresent()
-        && TokenType.SINGLE_USE.equals(allocationToken.get().getTokenType())) {
+    if (allocationToken.isPresent() && allocationToken.get().getTokenType().isOneTimeUse()) {
       entitiesToSave.add(
           allocationTokenFlowUtils.redeemToken(
               allocationToken.get(), domainHistory.getHistoryEntryId()));
@@ -438,11 +433,22 @@ public final class DomainCreateFlow implements MutatingFlow {
                 .build());
     persistEntityChanges(entityChanges);
 
+    // If the registrar is participating in tiered pricing promos, return the standard price in the
+    // response (even if the actual charged price is less)
+    boolean shouldShowDefaultPrice =
+        defaultTokenUsed
+            && RegistryConfig.getTieredPricingPromotionRegistrarIds().contains(registrarId);
+    FeesAndCredits responseFeesAndCredits =
+        shouldShowDefaultPrice
+            ? pricingLogic.getCreatePrice(
+                tld, targetId, now, years, isAnchorTenant, isSunriseCreate, Optional.empty())
+            : feesAndCredits;
+
     BeforeResponseReturnData responseData =
         flowCustomLogic.beforeResponse(
             BeforeResponseParameters.newBuilder()
                 .setResData(DomainCreateData.create(targetId, now, registrationExpirationTime))
-                .setResponseExtensions(createResponseExtensions(feeCreate, feesAndCredits))
+                .setResponseExtensions(createResponseExtensions(feeCreate, responseFeesAndCredits))
                 .build());
     return responseBuilder
         .setResData(responseData.resData())
@@ -517,7 +523,7 @@ public final class DomainCreateFlow implements MutatingFlow {
     if (behavior.equals(RegistrationBehavior.BYPASS_TLD_STATE)
         || behavior.equals(RegistrationBehavior.ANCHOR_TENANT)) {
       // Non-trademarked names with the state check bypassed are always available
-      if (!claimsList.getClaimKey(domainLabel).isPresent()) {
+      if (claimsList.getClaimKey(domainLabel).isEmpty()) {
         return;
       }
       if (!currentState.equals(START_DATE_SUNRISE)) {
@@ -614,7 +620,17 @@ public final class DomainCreateFlow implements MutatingFlow {
   private BillingRecurrence createAutorenewBillingEvent(
       HistoryEntryId domainHistoryId,
       DateTime registrationExpirationTime,
-      RenewalPriceInfo renewalpriceInfo) {
+      boolean isAnchorTenant,
+      Optional<AllocationToken> allocationToken) {
+    // Non-standard renewal behaviors can occur for anchor tenants (always NONPREMIUM pricing) or if
+    // explicitly configured in the token (either NONPREMIUM or directly SPECIFIED). Use DEFAULT if
+    // none is configured.
+    RenewalPriceBehavior renewalPriceBehavior =
+        isAnchorTenant
+            ? RenewalPriceBehavior.NONPREMIUM
+            : allocationToken
+                .map(AllocationToken::getRenewalPriceBehavior)
+                .orElse(RenewalPriceBehavior.DEFAULT);
     return new BillingRecurrence.Builder()
         .setReason(Reason.RENEW)
         .setFlags(ImmutableSet.of(Flag.AUTO_RENEW))
@@ -623,8 +639,8 @@ public final class DomainCreateFlow implements MutatingFlow {
         .setEventTime(registrationExpirationTime)
         .setRecurrenceEndTime(END_OF_TIME)
         .setDomainHistoryId(domainHistoryId)
-        .setRenewalPriceBehavior(renewalpriceInfo.renewalPriceBehavior())
-        .setRenewalPrice(renewalpriceInfo.renewalPrice())
+        .setRenewalPriceBehavior(renewalPriceBehavior)
+        .setRenewalPrice(allocationToken.flatMap(AllocationToken::getRenewalPrice).orElse(null))
         .build();
   }
 
@@ -666,48 +682,6 @@ public final class DomainCreateFlow implements MutatingFlow {
                     domainName, true, historyEntry.getTrid(), now)))
         .setHistoryEntry(historyEntry)
         .build();
-  }
-
-  /**
-   * Determines the {@link RenewalPriceBehavior} and the renewal price that needs be stored in the
-   * {@link BillingRecurrence} billing events.
-   *
-   * <p>By default, the renewal price is calculated during the process of renewal. Renewal price
-   * should be the createCost if and only if the renewal price behavior in the {@link
-   * AllocationToken} is 'SPECIFIED'.
-   */
-  static RenewalPriceInfo getRenewalPriceInfo(
-      boolean isAnchorTenant,
-      Optional<AllocationToken> allocationToken,
-      FeesAndCredits feesAndCredits) {
-    if (isAnchorTenant) {
-      allocationToken.ifPresent(
-          token ->
-              checkArgument(
-                  token.getRenewalPriceBehavior() != RenewalPriceBehavior.SPECIFIED,
-                  "Renewal price behavior cannot be SPECIFIED for anchor tenant"));
-      return RenewalPriceInfo.create(RenewalPriceBehavior.NONPREMIUM, null);
-    } else if (allocationToken.isPresent()
-        && allocationToken.get().getRenewalPriceBehavior() == RenewalPriceBehavior.SPECIFIED) {
-      return RenewalPriceInfo.create(
-          RenewalPriceBehavior.SPECIFIED, feesAndCredits.getCreateCost());
-    } else {
-      return RenewalPriceInfo.create(RenewalPriceBehavior.DEFAULT, null);
-    }
-  }
-
-  /** A class to store renewal info used in {@link BillingRecurrence} billing events. */
-  @AutoValue
-  public abstract static class RenewalPriceInfo {
-    static DomainCreateFlow.RenewalPriceInfo create(
-        RenewalPriceBehavior renewalPriceBehavior, @Nullable Money renewalPrice) {
-      return new AutoValue_DomainCreateFlow_RenewalPriceInfo(renewalPriceBehavior, renewalPrice);
-    }
-
-    public abstract RenewalPriceBehavior renewalPriceBehavior();
-
-    @Nullable
-    public abstract Money renewalPrice();
   }
 
   private static ImmutableList<FeeTransformResponseExtension> createResponseExtensions(

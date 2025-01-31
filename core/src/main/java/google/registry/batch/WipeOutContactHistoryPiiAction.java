@@ -14,10 +14,10 @@
 
 package google.registry.batch;
 
-import static google.registry.batch.BatchModule.PARAM_DRY_RUN;
 import static google.registry.beam.BeamUtils.createJobName;
-import static javax.servlet.http.HttpServletResponse.SC_INTERNAL_SERVER_ERROR;
-import static javax.servlet.http.HttpServletResponse.SC_OK;
+import static google.registry.request.RequestParameters.PARAM_DRY_RUN;
+import static jakarta.servlet.http.HttpServletResponse.SC_INTERNAL_SERVER_ERROR;
+import static jakarta.servlet.http.HttpServletResponse.SC_OK;
 
 import com.google.api.services.dataflow.Dataflow;
 import com.google.api.services.dataflow.model.LaunchFlexTemplateParameter;
@@ -28,14 +28,14 @@ import com.google.common.flogger.FluentLogger;
 import com.google.common.net.MediaType;
 import google.registry.beam.wipeout.WipeOutContactHistoryPiiPipeline;
 import google.registry.config.RegistryConfig.Config;
-import google.registry.config.RegistryEnvironment;
 import google.registry.model.contact.ContactHistory;
 import google.registry.request.Action;
-import google.registry.request.Action.Service;
+import google.registry.request.Action.GaeService;
 import google.registry.request.Parameter;
 import google.registry.request.Response;
 import google.registry.request.auth.Auth;
 import google.registry.util.Clock;
+import google.registry.util.RegistryEnvironment;
 import java.io.IOException;
 import java.util.Optional;
 import javax.inject.Inject;
@@ -49,9 +49,9 @@ import org.joda.time.DateTime;
  * time.
  */
 @Action(
-    service = Service.BACKEND,
+    service = GaeService.BACKEND,
     path = WipeOutContactHistoryPiiAction.PATH,
-    auth = Auth.AUTH_API_ADMIN)
+    auth = Auth.AUTH_ADMIN)
 public class WipeOutContactHistoryPiiAction implements Runnable {
 
   public static final String PATH = "/_dr/task/wipeOutContactHistoryPii";

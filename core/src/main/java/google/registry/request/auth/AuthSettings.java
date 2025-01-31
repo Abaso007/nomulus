@@ -14,9 +14,8 @@
 
 package google.registry.request.auth;
 
-import com.google.auto.value.AutoValue;
-import com.google.common.collect.ImmutableList;
 import com.google.errorprone.annotations.Immutable;
+import google.registry.model.console.UserRoles;
 
 /**
  * Parameters used to configure the authenticator.
@@ -25,29 +24,7 @@ import com.google.errorprone.annotations.Immutable;
  * values.
  */
 @Immutable
-@AutoValue
-public abstract class AuthSettings {
-
-  public abstract ImmutableList<AuthMethod> methods();
-
-  public abstract AuthLevel minimumLevel();
-
-  public abstract UserPolicy userPolicy();
-
-  static AuthSettings create(
-      ImmutableList<AuthMethod> methods, AuthLevel minimumLevel, UserPolicy userPolicy) {
-    return new AutoValue_AuthSettings(methods, minimumLevel, userPolicy);
-  }
-
-  /** Available methods for authentication. */
-  public enum AuthMethod {
-
-    /** Authentication methods suitable for API-style access, such as OAuth 2. */
-    API,
-
-    /** Legacy authentication using cookie-based App Engine Users API. Must come last if present. */
-    LEGACY
-  }
+public record AuthSettings(AuthLevel minimumLevel, UserPolicy userPolicy) {
 
   /**
    * Authentication level.
@@ -68,10 +45,11 @@ public abstract class AuthSettings {
     /**
      * Authentication required, but user not required.
      *
-     * <p>In Auth: Authentication is required, but app-internal authentication (which isn't
-     * associated with a specific user) is permitted.
+     * <p>In Auth: authentication is required, but App-internal authentication (which isn't
+     * associated with a specific user, but a service account) is permitted. Examples include
+     * requests from Cloud Tasks, Cloud Scheduler, and the proxy.
      *
-     * <p>In AuthResult: App-internal authentication was successful.
+     * <p>In AuthResult: App-internal authentication (via service accounts) was successful.
      */
     APP,
 
@@ -92,12 +70,7 @@ public abstract class AuthSettings {
     /** No user policy is enforced; anyone can access this action. */
     PUBLIC,
 
-    /**
-     * If there is a user, it must be an admin, as determined by isUserAdmin().
-     *
-     * <p>Note that, according to App Engine, anybody with access to the app in the GCP Console,
-     * including editors and viewers, is an admin.
-     */
+    /** If there is a user, it must be an admin, as determined by {@link UserRoles#isAdmin()}. */
     ADMIN
   }
 }

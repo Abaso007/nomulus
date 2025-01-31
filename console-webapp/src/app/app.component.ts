@@ -1,4 +1,4 @@
-// Copyright 2022 The Nomulus Authors. All Rights Reserved.
+// Copyright 2024 The Nomulus Authors. All Rights Reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,26 +12,47 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import { Component } from '@angular/core';
+import { AfterViewInit, Component, ViewChild } from '@angular/core';
+import { MatSidenav } from '@angular/material/sidenav';
+import { NavigationEnd, Router } from '@angular/router';
 import { RegistrarService } from './registrar/registrar.service';
+import { BreakPointObserverService } from './shared/services/breakPoint.service';
 import { GlobalLoaderService } from './shared/services/globalLoader.service';
+import { UserDataService } from './shared/services/userData.service';
 
 @Component({
   selector: 'app-root',
   templateUrl: './app.component.html',
   styleUrls: ['./app.component.scss'],
+  standalone: false,
 })
-export class AppComponent {
-  renderRouter: boolean = true;
+export class AppComponent implements AfterViewInit {
+  @ViewChild(MatSidenav)
+  sidenav!: MatSidenav;
+
   constructor(
     protected registrarService: RegistrarService,
-    protected globalLoader: GlobalLoaderService
-  ) {
-    registrarService.activeRegistrarIdChange.subscribe(() => {
-      this.renderRouter = false;
-      setTimeout(() => {
-        this.renderRouter = true;
-      }, 400);
+    protected userDataService: UserDataService,
+    protected globalLoader: GlobalLoaderService,
+    protected breakpointObserver: BreakPointObserverService,
+    private router: Router
+  ) {}
+
+  ngAfterViewInit() {
+    this.router.events.subscribe((event) => {
+      if (event instanceof NavigationEnd) {
+        if (this.breakpointObserver.isMobileView()) {
+          this.sidenav.close();
+        }
+      }
     });
+  }
+
+  toggleSidenav() {
+    if (this.sidenav.opened) {
+      this.sidenav.close();
+    } else {
+      this.sidenav.open();
+    }
   }
 }

@@ -21,13 +21,12 @@ import static google.registry.util.PreconditionsUtils.checkArgumentPresent;
 
 import com.beust.jcommander.Parameter;
 import com.beust.jcommander.Parameters;
-import com.google.common.base.Strings;
 import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Streams;
-import google.registry.config.RegistryEnvironment;
 import google.registry.model.registrar.Registrar;
 import google.registry.tools.server.VerifyOteAction;
+import google.registry.util.RegistryEnvironment;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Collection;
@@ -94,14 +93,14 @@ final class VerifyOteCommand implements CommandWithConnection {
         ImmutableMap.of(
             "summarize", Boolean.toString(summarize),
             "registrars", new ArrayList<>(registrars)));
-    System.out.println(Strings.repeat("-", 80));
+    System.out.println("-".repeat(80));
     for (Entry<String, Object> registrar : response.entrySet()) {
       System.out.printf(
           summarize ? "%-20s - %s\n" : "\n=========== %s OT&E status ============\n%s\n",
           registrar.getKey(),
           registrar.getValue());
     }
-    System.out.println(Strings.repeat("-", 80));
+    System.out.println("-".repeat(80));
   }
 
   /**

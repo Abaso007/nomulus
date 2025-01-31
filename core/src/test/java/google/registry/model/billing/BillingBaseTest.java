@@ -15,7 +15,6 @@
 package google.registry.model.billing;
 
 import static com.google.common.truth.Truth.assertThat;
-import static com.google.common.truth.Truth8.assertThat;
 import static google.registry.model.domain.token.AllocationToken.TokenType.UNLIMITED_USE;
 import static google.registry.testing.DatabaseHelper.createTld;
 import static google.registry.testing.DatabaseHelper.loadByEntity;
@@ -51,7 +50,7 @@ import org.junit.jupiter.api.Test;
 
 /** Unit tests for {@link BillingBase}. */
 public class BillingBaseTest extends EntityTestCase {
-  private final DateTime now = DateTime.now(UTC);
+  private final DateTime now = DateTime.parse("2012-01-23T22:33:44Z");
 
   BillingBaseTest() {
     super(JpaEntityCoverageCheck.ENABLED);

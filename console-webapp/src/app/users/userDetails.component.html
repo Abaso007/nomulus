@@ -1,0 +1,110 @@
+<div
+  class="console-app__user-details"
+  cdkTrapFocus
+  [cdkTrapFocusAutoCapture]="true"
+>
+  @if(isEditing) {
+  <h1 class="mat-headline-4">Editing {{ userDetails().emailAddress }}</h1>
+  <mat-divider></mat-divider>
+  <div class="console-app__user-details-controls">
+    <button
+      mat-icon-button
+      aria-label="Back to view user"
+      (click)="isEditing = false"
+    >
+      <mat-icon>arrow_back</mat-icon>
+    </button>
+  </div>
+  <app-user-edit-form
+    [user]="userDetails()"
+    (onEditComplete)="saveEdit($event)"
+  />
+  } @else { @if(isNewUser) {
+  <h1 class="mat-headline-4">
+    {{ userDetails().emailAddress + " successfully created" }}
+  </h1>
+  } @else {
+  <h1 class="mat-headline-4">User details</h1>
+  }
+  <mat-divider></mat-divider>
+  <div class="console-app__user-details-controls">
+    <button mat-icon-button aria-label="Back to users list" (click)="goBack()">
+      <mat-icon>arrow_back</mat-icon>
+    </button>
+    <div class="spacer"></div>
+    <button
+      mat-flat-button
+      color="primary"
+      aria-label="Edit User"
+      (click)="isEditing = true"
+    >
+      <mat-icon>edit</mat-icon>
+      Edit
+    </button>
+    <button
+      mat-icon-button
+      aria-label="Delete User"
+      (click)="deleteUser()"
+      [disabled]="isLoading"
+    >
+      <mat-icon>delete</mat-icon>
+    </button>
+  </div>
+  <div *ngIf="isNewUser" class="console-app__user-details-save-password">
+    <mat-icon>priority_high</mat-icon>
+    Please save the password. For your security, we do not store passwords in a
+    recoverable format.
+  </div>
+
+  <p *ngIf="isLoading">
+    <mat-progress-bar mode="query"></mat-progress-bar>
+  </p>
+
+  <mat-card appearance="outlined">
+    <mat-card-content>
+      <mat-list role="list">
+        <mat-list-item role="listitem">
+          <h2>User details</h2>
+        </mat-list-item>
+        <mat-divider></mat-divider>
+        <mat-list-item role="listitem">
+          <span class="console-app__list-key">User email</span>
+          <span class="console-app__list-value">{{
+            userDetails().emailAddress
+          }}</span>
+        </mat-list-item>
+        <mat-divider></mat-divider>
+        <mat-list-item role="listitem">
+          <span class="console-app__list-key">User role</span>
+          <span class="console-app__list-value">{{
+            roleToDescription(userDetails().role)
+          }}</span>
+        </mat-list-item>
+        @if (userDetails().password) {
+        <mat-divider></mat-divider>
+        <mat-list-item role="listitem">
+          <span class="console-app__list-key">Password</span>
+          <span
+            class="console-app__list-value console-app__user-details-password"
+          >
+            <input
+              [type]="isPasswordVisible ? 'text' : 'password'"
+              [value]="userDetails().password"
+              aria-label="Password field"
+              readonly
+            />
+            <button
+              mat-button
+              aria-hidden="true"
+              (click)="isPasswordVisible = !isPasswordVisible"
+            >
+              {{ isPasswordVisible ? "Hide" : "View" }} password
+            </button>
+          </span>
+        </mat-list-item>
+        }
+      </mat-list>
+    </mat-card-content>
+  </mat-card>
+  }
+</div>

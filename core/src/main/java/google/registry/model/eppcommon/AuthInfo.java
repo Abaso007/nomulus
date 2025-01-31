@@ -16,16 +16,17 @@ package google.registry.model.eppcommon;
 
 import google.registry.model.ImmutableObject;
 import google.registry.model.UnsafeSerializable;
-import javax.persistence.Embeddable;
-import javax.persistence.Embedded;
-import javax.persistence.MappedSuperclass;
-import javax.xml.bind.annotation.XmlAttribute;
-import javax.xml.bind.annotation.XmlTransient;
-import javax.xml.bind.annotation.XmlType;
-import javax.xml.bind.annotation.XmlValue;
-import javax.xml.bind.annotation.adapters.CollapsedStringAdapter;
-import javax.xml.bind.annotation.adapters.NormalizedStringAdapter;
-import javax.xml.bind.annotation.adapters.XmlJavaTypeAdapter;
+import jakarta.persistence.Embeddable;
+import jakarta.persistence.Embedded;
+import jakarta.persistence.MappedSuperclass;
+import jakarta.xml.bind.annotation.XmlAttribute;
+import jakarta.xml.bind.annotation.XmlTransient;
+import jakarta.xml.bind.annotation.XmlType;
+import jakarta.xml.bind.annotation.XmlValue;
+import jakarta.xml.bind.annotation.adapters.CollapsedStringAdapter;
+import jakarta.xml.bind.annotation.adapters.NormalizedStringAdapter;
+import jakarta.xml.bind.annotation.adapters.XmlJavaTypeAdapter;
+import javax.annotation.Nullable;
 
 /**
  * The "authInfoType" complex type.
@@ -49,10 +50,12 @@ public abstract class AuthInfo extends ImmutableObject implements UnsafeSerializ
   public static class PasswordAuth extends ImmutableObject implements UnsafeSerializable {
     @XmlValue
     @XmlJavaTypeAdapter(NormalizedStringAdapter.class)
+    @Nullable
     String value;
 
     @XmlAttribute(name = "roid")
     @XmlJavaTypeAdapter(CollapsedStringAdapter.class)
+    @Nullable
     String repoId;
 
     public String getValue() {
@@ -63,14 +66,14 @@ public abstract class AuthInfo extends ImmutableObject implements UnsafeSerializ
       return repoId;
     }
 
-    public static PasswordAuth create(String value, String repoId) {
+    public static PasswordAuth create(@Nullable String value, @Nullable String repoId) {
       PasswordAuth instance = new PasswordAuth();
       instance.value = value;
       instance.repoId = repoId;
       return instance;
     }
 
-    public static PasswordAuth create(String value) {
+    public static PasswordAuth create(@Nullable String value) {
       return create(value, null);
     }
   }

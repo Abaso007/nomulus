@@ -32,6 +32,7 @@ import google.registry.request.HttpException.UnprocessableEntityException;
 import google.registry.request.Parameter;
 import google.registry.request.ParameterMap;
 import google.registry.request.RequestUrl;
+import jakarta.persistence.criteria.CriteriaBuilder;
 import java.io.UnsupportedEncodingException;
 import java.net.URI;
 import java.net.URLEncoder;
@@ -42,7 +43,6 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import javax.inject.Inject;
-import javax.persistence.criteria.CriteriaBuilder;
 
 /**
  * Base RDAP (new WHOIS) action for domain, nameserver and entity search requests.
@@ -121,7 +121,7 @@ public abstract class RdapSearchActionBase extends RdapActionBase {
    */
   protected boolean shouldBeVisible(EppResource eppResource) {
     return isAuthorized(eppResource)
-        && (!registrarParam.isPresent()
+        && (registrarParam.isEmpty()
             || registrarParam.get().equals(eppResource.getPersistedCurrentSponsorRegistrarId()));
   }
 
@@ -135,7 +135,7 @@ public abstract class RdapSearchActionBase extends RdapActionBase {
    */
   protected boolean shouldBeVisible(Registrar registrar) {
     return isAuthorized(registrar)
-        && (!registrarParam.isPresent() || registrarParam.get().equals(registrar.getRegistrarId()));
+        && (registrarParam.isEmpty() || registrarParam.get().equals(registrar.getRegistrarId()));
   }
 
   /**

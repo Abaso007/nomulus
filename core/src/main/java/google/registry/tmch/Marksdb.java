@@ -18,8 +18,8 @@ import static com.google.common.base.Preconditions.checkArgument;
 import static google.registry.request.UrlConnectionUtils.getResponseBytes;
 import static google.registry.request.UrlConnectionUtils.setBasicAuth;
 import static google.registry.util.HexDumper.dumpHex;
+import static jakarta.servlet.http.HttpServletResponse.SC_OK;
 import static java.nio.charset.StandardCharsets.US_ASCII;
-import static javax.servlet.http.HttpServletResponse.SC_OK;
 
 import com.google.common.collect.ImmutableList;
 import com.google.common.flogger.FluentLogger;
@@ -77,13 +77,12 @@ public final class Marksdb {
             "No OpenPGP packets found in signature.\n%s",
             dumpHex(signature)));
       }
-      if (!(object instanceof PGPSignatureList)) {
+      if (!(object instanceof PGPSignatureList sigs)) {
         throw new SignatureException(String.format(
             "Expected PGPSignatureList packet but got %s\n%s",
             object.getClass().getSimpleName(),
             dumpHex(signature)));
       }
-      PGPSignatureList sigs = (PGPSignatureList) object;
       if (sigs.isEmpty()) {
         throw new SignatureException(String.format(
             "PGPSignatureList doesn't have a PGPSignature.\n%s",
@@ -121,6 +120,8 @@ public final class Marksdb {
       return getResponseBytes(connection);
     } catch (IOException e) {
       throw new IOException(String.format("Error connecting to MarksDB at URL %s", url), e);
+    } finally {
+      connection.disconnect();
     }
   }
 

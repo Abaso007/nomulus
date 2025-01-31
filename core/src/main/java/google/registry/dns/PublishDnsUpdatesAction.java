@@ -30,7 +30,7 @@ import static google.registry.persistence.transaction.TransactionManagerFactory.
 import static google.registry.request.Action.Method.POST;
 import static google.registry.request.RequestParameters.PARAM_TLD;
 import static google.registry.util.CollectionUtils.nullToEmpty;
-import static javax.servlet.http.HttpServletResponse.SC_ACCEPTED;
+import static jakarta.servlet.http.HttpServletResponse.SC_ACCEPTED;
 
 import com.google.common.base.Joiner;
 import com.google.common.collect.ImmutableList;
@@ -50,9 +50,10 @@ import google.registry.model.domain.Domain;
 import google.registry.model.host.Host;
 import google.registry.model.registrar.Registrar;
 import google.registry.model.registrar.RegistrarPoc;
+import google.registry.model.registrar.RegistrarPocBase;
 import google.registry.model.tld.Tld;
 import google.registry.request.Action;
-import google.registry.request.Action.Service;
+import google.registry.request.Action.GaeService;
 import google.registry.request.Header;
 import google.registry.request.HttpException.ServiceUnavailableException;
 import google.registry.request.Parameter;
@@ -62,21 +63,21 @@ import google.registry.request.lock.LockHandler;
 import google.registry.util.Clock;
 import google.registry.util.DomainNameUtils;
 import google.registry.util.EmailMessage;
+import jakarta.mail.internet.InternetAddress;
 import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.Callable;
 import javax.inject.Inject;
-import javax.mail.internet.InternetAddress;
 import org.joda.time.DateTime;
 import org.joda.time.Duration;
 
 /** Task that sends domain and host updates to the DNS server. */
 @Action(
-    service = Action.Service.BACKEND,
+    service = GaeService.BACKEND,
     path = PublishDnsUpdatesAction.PATH,
     method = POST,
     automaticallyPrintOk = true,
-    auth = Auth.AUTH_API_ADMIN)
+    auth = Auth.AUTH_ADMIN)
 public final class PublishDnsUpdatesAction implements Runnable, Callable<Void> {
 
   public static final String PATH = "/_dr/task/publishDnsUpdates";
@@ -118,7 +119,6 @@ public final class PublishDnsUpdatesAction implements Runnable, Callable<Void> {
   private final String dnsUpdateFailRegistryName;
   private final Lazy<InternetAddress> registrySupportEmail;
   private final Lazy<InternetAddress> registryCcEmail;
-  private final InternetAddress gSuiteOutgoingEmailAddress;
 
   @Inject
   public PublishDnsUpdatesAction(
@@ -136,7 +136,6 @@ public final class PublishDnsUpdatesAction implements Runnable, Callable<Void> {
       @Config("dnsUpdateFailRegistryName") String dnsUpdateFailRegistryName,
       @Config("registrySupportEmail") Lazy<InternetAddress> registrySupportEmail,
       @Config("registryCcEmail") Lazy<InternetAddress> registryCcEmail,
-      @Config("gSuiteOutgoingEmailAddress") InternetAddress gSuiteOutgoingEmailAddress,
       @Header(CLOUD_TASKS_RETRY_HEADER) int retryCount,
       DnsWriterProxy dnsWriterProxy,
       DnsMetrics dnsMetrics,
@@ -167,7 +166,6 @@ public final class PublishDnsUpdatesAction implements Runnable, Callable<Void> {
     this.dnsUpdateFailRegistryName = dnsUpdateFailRegistryName;
     this.registrySupportEmail = registrySupportEmail;
     this.registryCcEmail = registryCcEmail;
-    this.gSuiteOutgoingEmailAddress = gSuiteOutgoingEmailAddress;
   }
 
   private void recordActionResult(ActionStatus status) {
@@ -298,7 +296,7 @@ public final class PublishDnsUpdatesAction implements Runnable, Callable<Void> {
 
       ImmutableList<InternetAddress> recipients =
           registrar.get().getContacts().stream()
-              .filter(c -> c.getTypes().contains(RegistrarPoc.Type.ADMIN))
+              .filter(c -> c.getTypes().contains(RegistrarPocBase.Type.ADMIN))
               .map(RegistrarPoc::getEmailAddress)
               .map(PublishDnsUpdatesAction::emailToInternetAddress)
               .collect(toImmutableList());
@@ -309,7 +307,6 @@ public final class PublishDnsUpdatesAction implements Runnable, Callable<Void> {
               .setSubject(dnsUpdateFailEmailSubjectText)
               .setRecipients(recipients)
               .addBcc(registryCcEmail.get())
-              .setFrom(gSuiteOutgoingEmailAddress)
               .build());
 
     } else {
@@ -331,9 +328,9 @@ public final class PublishDnsUpdatesAction implements Runnable, Callable<Void> {
   private void enqueue(ImmutableList<String> domains, ImmutableList<String> hosts) {
     cloudTasksUtils.enqueue(
         DNS_PUBLISH_PUSH_QUEUE_NAME,
-        cloudTasksUtils.createPostTask(
-            PATH,
-            Service.BACKEND,
+        cloudTasksUtils.createTask(
+            this.getClass(),
+            POST,
             ImmutableMultimap.<String, String>builder()
                 .put(PARAM_TLD, tld)
                 .put(PARAM_DNS_WRITER, dnsWriter)

@@ -32,9 +32,7 @@ import google.registry.groups.GmailModule;
 import google.registry.groups.GroupsModule;
 import google.registry.groups.GroupssettingsModule;
 import google.registry.keyring.KeyringModule;
-import google.registry.keyring.api.DummyKeyringModule;
 import google.registry.keyring.api.KeyModule;
-import google.registry.keyring.secretmanager.SecretManagerKeyringModule;
 import google.registry.module.backend.BackendRequestComponent.BackendRequestComponentModule;
 import google.registry.monitoring.whitebox.StackdriverModule;
 import google.registry.persistence.PersistenceModule;
@@ -43,9 +41,6 @@ import google.registry.rde.JSchModule;
 import google.registry.request.Modules.GsonModule;
 import google.registry.request.Modules.NetHttpTransportModule;
 import google.registry.request.Modules.UrlConnectionServiceModule;
-import google.registry.request.Modules.UrlFetchServiceModule;
-import google.registry.request.Modules.UrlFetchTransportModule;
-import google.registry.request.Modules.UserServiceModule;
 import google.registry.request.auth.AuthModule;
 import google.registry.util.UtilsModule;
 import javax.inject.Singleton;
@@ -63,7 +58,6 @@ import javax.inject.Singleton;
       CredentialModule.class,
       CustomLogicFactoryModule.class,
       DirectoryModule.class,
-      DummyKeyringModule.class,
       DriveModule.class,
       GmailModule.class,
       GroupsModule.class,
@@ -74,15 +68,11 @@ import javax.inject.Singleton;
       KeyringModule.class,
       NetHttpTransportModule.class,
       PersistenceModule.class,
-      SecretManagerKeyringModule.class,
       SecretManagerModule.class,
       ServerTridProviderModule.class,
       SheetsServiceModule.class,
       StackdriverModule.class,
       UrlConnectionServiceModule.class,
-      UrlFetchServiceModule.class,
-      UrlFetchTransportModule.class,
-      UserServiceModule.class,
       VoidDnsWriterModule.class,
       UtilsModule.class
     })
