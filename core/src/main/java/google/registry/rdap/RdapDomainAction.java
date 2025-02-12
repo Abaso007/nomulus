@@ -26,6 +26,7 @@ import google.registry.rdap.RdapJsonFormatter.OutputDataType;
 import google.registry.rdap.RdapMetrics.EndpointType;
 import google.registry.rdap.RdapObjectClasses.RdapDomain;
 import google.registry.request.Action;
+import google.registry.request.Action.GaeService;
 import google.registry.request.HttpException.BadRequestException;
 import google.registry.request.HttpException.NotFoundException;
 import google.registry.request.auth.Auth;
@@ -34,7 +35,7 @@ import javax.inject.Inject;
 
 /** RDAP (new WHOIS) action for domain requests. */
 @Action(
-    service = Action.Service.PUBAPI,
+    service = GaeService.PUBAPI,
     path = "/rdap/domain/",
     method = {GET, HEAD},
     isPrefix = true,
@@ -64,7 +65,7 @@ public class RdapDomainAction extends RdapActionBase {
             Domain.class,
             pathSearchString,
             shouldIncludeDeleted() ? START_OF_TIME : rdapJsonFormatter.getRequestTime());
-    if (!domain.isPresent() || !isAuthorized(domain.get())) {
+    if (domain.isEmpty() || !isAuthorized(domain.get())) {
       // RFC7480 5.3 - if the server wishes to respond that it doesn't have data satisfying the
       // query, it MUST reply with 404 response code.
       //

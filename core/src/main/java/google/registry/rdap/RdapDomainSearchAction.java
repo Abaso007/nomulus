@@ -43,19 +43,20 @@ import google.registry.rdap.RdapMetrics.WildcardType;
 import google.registry.rdap.RdapSearchResults.DomainSearchResponse;
 import google.registry.rdap.RdapSearchResults.IncompletenessWarningType;
 import google.registry.request.Action;
+import google.registry.request.Action.GaeService;
 import google.registry.request.HttpException.BadRequestException;
 import google.registry.request.HttpException.NotFoundException;
 import google.registry.request.HttpException.UnprocessableEntityException;
 import google.registry.request.Parameter;
 import google.registry.request.auth.Auth;
 import google.registry.util.NonFinalForTesting;
+import jakarta.persistence.criteria.CriteriaBuilder;
 import java.net.InetAddress;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Optional;
 import java.util.stream.Stream;
 import javax.inject.Inject;
-import javax.persistence.criteria.CriteriaBuilder;
 import org.hibernate.Hibernate;
 
 /**
@@ -71,7 +72,7 @@ import org.hibernate.Hibernate;
 // TODO: This isn't required by the RDAP Technical Implementation Guide, and hence should be
 // deleted, at least until it's actually required.
 @Action(
-    service = Action.Service.PUBAPI,
+    service = GaeService.PUBAPI,
     path = "/rdap/domains",
     method = {GET, HEAD},
     auth = Auth.AUTH_PUBLIC)
@@ -342,7 +343,7 @@ public class RdapDomainSearchAction extends RdapSearchActionBase {
               Host.class,
               partialStringQuery.getInitialString(),
               shouldIncludeDeleted() ? START_OF_TIME : getRequestTime());
-      return (!host.isPresent()
+      return (host.isEmpty()
               || !desiredRegistrar.get().equals(host.get().getPersistedCurrentSponsorRegistrarId()))
           ? ImmutableList.of()
           : ImmutableList.of(host.get().createVKey());
@@ -441,7 +442,7 @@ public class RdapDomainSearchAction extends RdapSearchActionBase {
         replicaTm()
             .transact(
                 () -> {
-                  javax.persistence.Query query =
+                  jakarta.persistence.Query query =
                       replicaTm()
                           .getEntityManager()
                           .createNativeQuery(queryBuilder.toString())

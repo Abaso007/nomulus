@@ -15,13 +15,14 @@
 package google.registry.whois;
 
 import static google.registry.request.Action.Method.POST;
-import static javax.servlet.http.HttpServletResponse.SC_INTERNAL_SERVER_ERROR;
-import static javax.servlet.http.HttpServletResponse.SC_OK;
+import static jakarta.servlet.http.HttpServletResponse.SC_INTERNAL_SERVER_ERROR;
+import static jakarta.servlet.http.HttpServletResponse.SC_OK;
 
 import com.google.common.flogger.FluentLogger;
 import com.google.common.net.MediaType;
 import google.registry.config.RegistryConfig.Config;
 import google.registry.request.Action;
+import google.registry.request.Action.GaeService;
 import google.registry.request.Response;
 import google.registry.request.auth.Auth;
 import google.registry.util.Clock;
@@ -47,11 +48,7 @@ import org.joda.time.DateTime;
  * @see WhoisHttpAction
  * @see <a href="http://www.ietf.org/rfc/rfc3912.txt">RFC 3912: WHOIS Protocol Specification</a>
  */
-@Action(
-    service = Action.Service.PUBAPI,
-    path = "/_dr/whois",
-    method = POST,
-    auth = Auth.AUTH_API_PUBLIC)
+@Action(service = GaeService.PUBAPI, path = "/_dr/whois", method = POST, auth = Auth.AUTH_ADMIN)
 public class WhoisAction implements Runnable {
 
   private static final FluentLogger logger = FluentLogger.forEnclosingClass();

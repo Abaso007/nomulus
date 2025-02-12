@@ -14,9 +14,9 @@
 
 package google.registry.beam.common;
 
-import google.registry.config.RegistryEnvironment;
 import google.registry.persistence.PersistenceModule.JpaTransactionManagerType;
 import google.registry.persistence.PersistenceModule.TransactionIsolationLevel;
+import google.registry.util.RegistryEnvironment;
 import java.util.Objects;
 import javax.annotation.Nullable;
 import org.apache.beam.sdk.extensions.gcp.options.GcpOptions;
@@ -63,7 +63,7 @@ public interface RegistryPipelineOptions extends GcpOptions {
   }
 
   /**
-   * Validates the GCP project and Registry environment settings in {@code option}. If project is
+   * Validates the GCP project and Registry environment settings in {@code options}. If project is
    * undefined, it is set according to the Registry environment; if project is defined but
    * inconsistent with the Registry environment, an {@link IllegalArgumentException} will be thrown.
    *

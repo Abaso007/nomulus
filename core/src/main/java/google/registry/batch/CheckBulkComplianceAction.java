@@ -13,6 +13,7 @@
 // limitations under the License.
 package google.registry.batch;
 
+import static google.registry.persistence.PersistenceModule.TransactionIsolationLevel.TRANSACTION_REPEATABLE_READ;
 import static google.registry.persistence.transaction.TransactionManagerFactory.tm;
 import static google.registry.util.DateTimeUtils.END_OF_TIME;
 
@@ -26,7 +27,7 @@ import google.registry.model.domain.token.AllocationToken;
 import google.registry.model.domain.token.BulkPricingPackage;
 import google.registry.model.registrar.Registrar;
 import google.registry.request.Action;
-import google.registry.request.Action.Service;
+import google.registry.request.Action.GaeService;
 import google.registry.request.auth.Auth;
 import google.registry.ui.server.SendEmailUtils;
 import google.registry.util.Clock;
@@ -38,10 +39,7 @@ import org.joda.time.Days;
  * An action that checks all {@link BulkPricingPackage} objects for compliance with their max create
  * limit.
  */
-@Action(
-    service = Service.BACKEND,
-    path = CheckBulkComplianceAction.PATH,
-    auth = Auth.AUTH_API_ADMIN)
+@Action(service = GaeService.BACKEND, path = CheckBulkComplianceAction.PATH, auth = Auth.AUTH_ADMIN)
 public class CheckBulkComplianceAction implements Runnable {
 
   public static final String PATH = "/_dr/task/checkBulkCompliance";
@@ -92,7 +90,7 @@ public class CheckBulkComplianceAction implements Runnable {
 
   @Override
   public void run() {
-    tm().transact(this::checkBulkPackages);
+    tm().transact(TRANSACTION_REPEATABLE_READ, this::checkBulkPackages);
   }
 
   private void checkBulkPackages() {
@@ -106,10 +104,10 @@ public class CheckBulkComplianceAction implements Runnable {
       Long creates =
           (Long)
               tm().query(
-                      "SELECT COUNT(*) FROM DomainHistory WHERE current_package_token ="
+                      "SELECT COUNT(*) FROM DomainHistory WHERE resource.currentBulkToken ="
                           + " :token AND modificationTime >= :lastBilling AND type ="
                           + " 'DOMAIN_CREATE'")
-                  .setParameter("token", bulkPricingPackage.getToken().getKey().toString())
+                  .setParameter("token", bulkPricingPackage.getToken())
                   .setParameter(
                       "lastBilling", bulkPricingPackage.getNextBillingDate().minusYears(1))
                   .getSingleResult();
@@ -187,18 +185,12 @@ public class CheckBulkComplianceAction implements Runnable {
               .getLastNotificationSent()
               .map(sentDate -> Days.daysBetween(sentDate, clock.nowUtc()).getDays())
               .orElse(Integer.MAX_VALUE);
-      if (daysSinceLastNotification < THIRTY_DAYS) {
-        // Don't send an email if notification was already sent within the last 30
-        // days
-        continue;
-      } else if (daysSinceLastNotification < FORTY_DAYS) {
-        // Send an upgrade email if last email was between 30 and 40 days ago
+      // Send a warning email if 30-39 days since last notification and an upgrade email if 40+ days
+      if (daysSinceLastNotification >= THIRTY_DAYS) {
         sendActiveDomainOverageEmail(
-            /* warning= */ false, bulkPricingPackage, overageList.get(bulkPricingPackage));
-      } else {
-        // Send a warning email
-        sendActiveDomainOverageEmail(
-            /* warning= */ true, bulkPricingPackage, overageList.get(bulkPricingPackage));
+            /* warning= */ daysSinceLastNotification >= FORTY_DAYS,
+            bulkPricingPackage,
+            overageList.get(bulkPricingPackage));
       }
     }
   }

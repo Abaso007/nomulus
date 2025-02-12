@@ -17,19 +17,23 @@ package google.registry.flows.domain;
 import static com.google.common.collect.ImmutableList.toImmutableList;
 import static com.google.common.io.BaseEncoding.base16;
 import static com.google.common.truth.Truth.assertThat;
-import static com.google.common.truth.Truth8.assertThat;
+import static google.registry.bsa.persistence.BsaTestingUtils.persistBsaLabel;
 import static google.registry.flows.FlowTestCase.UserPrivileges.SUPERUSER;
 import static google.registry.model.billing.BillingBase.Flag.ANCHOR_TENANT;
 import static google.registry.model.billing.BillingBase.Flag.RESERVED;
 import static google.registry.model.billing.BillingBase.Flag.SUNRISE;
-import static google.registry.model.billing.BillingBase.RenewalPriceBehavior.DEFAULT;
 import static google.registry.model.billing.BillingBase.RenewalPriceBehavior.NONPREMIUM;
 import static google.registry.model.billing.BillingBase.RenewalPriceBehavior.SPECIFIED;
+import static google.registry.model.common.FeatureFlag.FeatureName.MINIMUM_DATASET_CONTACTS_OPTIONAL;
+import static google.registry.model.common.FeatureFlag.FeatureStatus.ACTIVE;
+import static google.registry.model.common.FeatureFlag.FeatureStatus.INACTIVE;
 import static google.registry.model.domain.fee.Fee.FEE_EXTENSION_URIS;
 import static google.registry.model.domain.token.AllocationToken.TokenType.BULK_PRICING;
 import static google.registry.model.domain.token.AllocationToken.TokenType.DEFAULT_PROMO;
+import static google.registry.model.domain.token.AllocationToken.TokenType.REGISTER_BSA;
 import static google.registry.model.domain.token.AllocationToken.TokenType.SINGLE_USE;
 import static google.registry.model.domain.token.AllocationToken.TokenType.UNLIMITED_USE;
+import static google.registry.model.eppcommon.EppXmlTransformer.marshal;
 import static google.registry.model.eppcommon.StatusValue.PENDING_DELETE;
 import static google.registry.model.eppcommon.StatusValue.SERVER_HOLD;
 import static google.registry.model.tld.Tld.TldState.GENERAL_AVAILABILITY;
@@ -46,6 +50,7 @@ import static google.registry.testing.DatabaseHelper.createTld;
 import static google.registry.testing.DatabaseHelper.createTlds;
 import static google.registry.testing.DatabaseHelper.deleteTld;
 import static google.registry.testing.DatabaseHelper.getHistoryEntries;
+import static google.registry.testing.DatabaseHelper.loadAllOf;
 import static google.registry.testing.DatabaseHelper.loadRegistrar;
 import static google.registry.testing.DatabaseHelper.newContact;
 import static google.registry.testing.DatabaseHelper.newHost;
@@ -62,7 +67,6 @@ import static org.joda.money.CurrencyUnit.JPY;
 import static org.joda.money.CurrencyUnit.USD;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
-import com.google.common.base.Strings;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.ImmutableSet;
@@ -82,7 +86,6 @@ import google.registry.flows.domain.DomainCreateFlow.BulkDomainRegisteredForTooM
 import google.registry.flows.domain.DomainCreateFlow.MustHaveSignedMarksInCurrentPhaseException;
 import google.registry.flows.domain.DomainCreateFlow.NoGeneralRegistrationsInCurrentPhaseException;
 import google.registry.flows.domain.DomainCreateFlow.NoTrademarkedRegistrationsBeforeSunriseException;
-import google.registry.flows.domain.DomainCreateFlow.RenewalPriceInfo;
 import google.registry.flows.domain.DomainCreateFlow.SignedMarksOnlyDuringSunriseException;
 import google.registry.flows.domain.DomainFlowTmchUtils.FoundMarkExpiredException;
 import google.registry.flows.domain.DomainFlowTmchUtils.FoundMarkNotYetValidException;
@@ -96,6 +99,7 @@ import google.registry.flows.domain.DomainFlowUtils.ClaimsPeriodEndedException;
 import google.registry.flows.domain.DomainFlowUtils.CurrencyUnitMismatchException;
 import google.registry.flows.domain.DomainFlowUtils.CurrencyValueScaleException;
 import google.registry.flows.domain.DomainFlowUtils.DashesInThirdAndFourthException;
+import google.registry.flows.domain.DomainFlowUtils.DomainLabelBlockedByBsaException;
 import google.registry.flows.domain.DomainFlowUtils.DomainLabelTooLongException;
 import google.registry.flows.domain.DomainFlowUtils.DomainNameExistsAsTldException;
 import google.registry.flows.domain.DomainFlowUtils.DomainReservedException;
@@ -153,6 +157,7 @@ import google.registry.model.billing.BillingBase.Reason;
 import google.registry.model.billing.BillingBase.RenewalPriceBehavior;
 import google.registry.model.billing.BillingEvent;
 import google.registry.model.billing.BillingRecurrence;
+import google.registry.model.common.FeatureFlag;
 import google.registry.model.domain.Domain;
 import google.registry.model.domain.DomainHistory;
 import google.registry.model.domain.GracePeriod;
@@ -165,10 +170,13 @@ import google.registry.model.domain.secdns.DomainDsData;
 import google.registry.model.domain.token.AllocationToken;
 import google.registry.model.domain.token.AllocationToken.RegistrationBehavior;
 import google.registry.model.domain.token.AllocationToken.TokenStatus;
+import google.registry.model.eppcommon.Trid;
+import google.registry.model.eppoutput.EppOutput;
+import google.registry.model.eppoutput.EppResponse;
 import google.registry.model.poll.PendingActionNotificationResponse.DomainPendingActionNotificationResponse;
 import google.registry.model.poll.PollMessage;
 import google.registry.model.registrar.Registrar;
-import google.registry.model.registrar.Registrar.State;
+import google.registry.model.registrar.RegistrarBase.State;
 import google.registry.model.reporting.DomainTransactionRecord;
 import google.registry.model.reporting.DomainTransactionRecord.TransactionReportField;
 import google.registry.model.reporting.HistoryEntry;
@@ -183,7 +191,9 @@ import google.registry.tmch.LordnTaskUtils.LordnPhase;
 import google.registry.tmch.SmdrlCsvParser;
 import google.registry.tmch.TmchData;
 import google.registry.tmch.TmchTestData;
+import google.registry.xml.ValidationMode;
 import java.math.BigDecimal;
+import java.nio.charset.StandardCharsets;
 import java.util.Map;
 import java.util.Optional;
 import javax.annotation.Nullable;
@@ -216,7 +226,7 @@ class DomainCreateFlowTest extends ResourceFlowTestCase<DomainCreateFlow, Domain
 
   DomainCreateFlowTest() {
     setEppInput("domain_create.xml", ImmutableMap.of("DOMAIN", "example.tld"));
-    clock.setTo(DateTime.parse("1999-04-03T22:00:00.0Z").minus(Duration.millis(1)));
+    clock.setTo(DateTime.parse("1999-04-03T22:00:00.0Z").minus(Duration.millis(2)));
   }
 
   @BeforeEach
@@ -242,7 +252,21 @@ class DomainCreateFlowTest extends ResourceFlowTestCase<DomainCreateFlow, Domain
                     "badcrash,NAME_COLLISION"),
                 persistReservedList("global-list", "resdom,FULLY_BLOCKED"))
             .build());
+    persistResource(
+        new FeatureFlag()
+            .asBuilder()
+            .setFeatureName(MINIMUM_DATASET_CONTACTS_OPTIONAL)
+            .setStatusMap(ImmutableSortedMap.of(START_OF_TIME, INACTIVE))
+            .build());
     persistClaimsList(ImmutableMap.of("example-one", CLAIMS_KEY, "test-validate", CLAIMS_KEY));
+  }
+
+  private void enrollTldInBsa() {
+    persistResource(
+        Tld.get("tld")
+            .asBuilder()
+            .setBsaEnrollStartTime(Optional.of(clock.nowUtc().minusSeconds(1)))
+            .build());
   }
 
   /**
@@ -277,10 +301,8 @@ class DomainCreateFlowTest extends ResourceFlowTestCase<DomainCreateFlow, Domain
 
     boolean isAnchorTenant = expectedBillingFlags.contains(ANCHOR_TENANT);
     // Set up the creation cost.
-    BigDecimal createCost =
-        isDomainPremium(getUniqueIdFromCommand(), clock.nowUtc())
-            ? BigDecimal.valueOf(200)
-            : BigDecimal.valueOf(26);
+    boolean isDomainPremium = isDomainPremium(getUniqueIdFromCommand(), clock.nowUtc());
+    BigDecimal createCost = isDomainPremium ? BigDecimal.valueOf(200) : BigDecimal.valueOf(24);
     if (isAnchorTenant) {
       createCost = BigDecimal.ZERO;
     }
@@ -288,6 +310,26 @@ class DomainCreateFlowTest extends ResourceFlowTestCase<DomainCreateFlow, Domain
       createCost =
           createCost.multiply(
               BigDecimal.valueOf(1 - RegistryConfig.getSunriseDomainCreateDiscount()));
+    }
+    if (allocationToken != null) {
+      if (allocationToken
+          .getRegistrationBehavior()
+          .equals(RegistrationBehavior.NONPREMIUM_CREATE)) {
+        createCost =
+            createCost.subtract(
+                BigDecimal.valueOf(isDomainPremium ? 87 : 0)); // premium is 100, standard 13
+      }
+      if (allocationToken.getRenewalPriceBehavior().equals(NONPREMIUM)) {
+        createCost =
+            createCost.subtract(
+                BigDecimal.valueOf(isDomainPremium ? 89 : 0)); // premium is 100, standard 11
+      }
+      if (allocationToken.getRenewalPriceBehavior().equals(SPECIFIED)) {
+        createCost =
+            createCost
+                .subtract(BigDecimal.valueOf(isDomainPremium ? 100 : 11))
+                .add(allocationToken.getRenewalPrice().get().getAmount());
+      }
     }
     FeesAndCredits feesAndCredits =
         new FeesAndCredits.Builder()
@@ -317,9 +359,12 @@ class DomainCreateFlowTest extends ResourceFlowTestCase<DomainCreateFlow, Domain
         .hasType(HistoryEntry.Type.DOMAIN_CREATE)
         .and()
         .hasPeriodYears(2);
-    RenewalPriceInfo renewalPriceInfo =
-        DomainCreateFlow.getRenewalPriceInfo(
-            isAnchorTenant, Optional.ofNullable(allocationToken), feesAndCredits);
+    RenewalPriceBehavior expectedRenewalPriceBehavior =
+        isAnchorTenant
+            ? RenewalPriceBehavior.NONPREMIUM
+            : Optional.ofNullable(allocationToken)
+                .map(AllocationToken::getRenewalPriceBehavior)
+                .orElse(RenewalPriceBehavior.DEFAULT);
     // There should be one bill for the create and one for the recurrence autorenew event.
     BillingEvent createBillingEvent =
         new BillingEvent.Builder()
@@ -344,8 +389,11 @@ class DomainCreateFlowTest extends ResourceFlowTestCase<DomainCreateFlow, Domain
             .setEventTime(domain.getRegistrationExpirationTime())
             .setRecurrenceEndTime(END_OF_TIME)
             .setDomainHistory(historyEntry)
-            .setRenewalPriceBehavior(renewalPriceInfo.renewalPriceBehavior())
-            .setRenewalPrice(renewalPriceInfo.renewalPrice())
+            .setRenewalPriceBehavior(expectedRenewalPriceBehavior)
+            .setRenewalPrice(
+                Optional.ofNullable(allocationToken)
+                    .flatMap(AllocationToken::getRenewalPrice)
+                    .orElse(null))
             .build();
 
     ImmutableSet.Builder<BillingBase> expectedBillingEvents =
@@ -672,7 +720,7 @@ class DomainCreateFlowTest extends ResourceFlowTestCase<DomainCreateFlow, Domain
     doSuccessfulTest(
         "tld",
         "domain_create_response_fee.xml",
-        ImmutableMap.of("FEE_VERSION", "0.6", "FEE", "26.00"));
+        ImmutableMap.of("FEE_VERSION", "0.6", "FEE", "24.00"));
   }
 
   @Test
@@ -682,7 +730,7 @@ class DomainCreateFlowTest extends ResourceFlowTestCase<DomainCreateFlow, Domain
     doSuccessfulTest(
         "tld",
         "domain_create_response_fee.xml",
-        ImmutableMap.of("FEE_VERSION", "0.11", "FEE", "26.00"));
+        ImmutableMap.of("FEE_VERSION", "0.11", "FEE", "24.00"));
   }
 
   @Test
@@ -692,7 +740,7 @@ class DomainCreateFlowTest extends ResourceFlowTestCase<DomainCreateFlow, Domain
     doSuccessfulTest(
         "tld",
         "domain_create_response_fee.xml",
-        ImmutableMap.of("FEE_VERSION", "0.12", "FEE", "26.00"));
+        ImmutableMap.of("FEE_VERSION", "0.12", "FEE", "24.00"));
   }
 
   @Test
@@ -702,7 +750,7 @@ class DomainCreateFlowTest extends ResourceFlowTestCase<DomainCreateFlow, Domain
     doSuccessfulTest(
         "tld",
         "domain_create_response_fee.xml",
-        ImmutableMap.of("FEE_VERSION", "0.6", "FEE", "26.00"));
+        ImmutableMap.of("FEE_VERSION", "0.6", "FEE", "24.00"));
   }
 
   @Test
@@ -712,7 +760,7 @@ class DomainCreateFlowTest extends ResourceFlowTestCase<DomainCreateFlow, Domain
     doSuccessfulTest(
         "tld",
         "domain_create_response_fee.xml",
-        ImmutableMap.of("FEE_VERSION", "0.11", "FEE", "26.00"));
+        ImmutableMap.of("FEE_VERSION", "0.11", "FEE", "24.00"));
   }
 
   @Test
@@ -722,7 +770,7 @@ class DomainCreateFlowTest extends ResourceFlowTestCase<DomainCreateFlow, Domain
     doSuccessfulTest(
         "tld",
         "domain_create_response_fee.xml",
-        ImmutableMap.of("FEE_VERSION", "0.12", "FEE", "26.00"));
+        ImmutableMap.of("FEE_VERSION", "0.12", "FEE", "24.00"));
   }
 
   @Test
@@ -1071,7 +1119,12 @@ class DomainCreateFlowTest extends ResourceFlowTestCase<DomainCreateFlow, Domain
   @Test
   void testFailure_wrongFeeAmount_v06() {
     setEppInput("domain_create_fee.xml", ImmutableMap.of("FEE_VERSION", "0.6", "CURRENCY", "USD"));
-    persistResource(Tld.get("tld").asBuilder().setCreateBillingCost(Money.of(USD, 20)).build());
+    persistResource(
+        Tld.get("tld")
+            .asBuilder()
+            .setCreateBillingCostTransitions(
+                ImmutableSortedMap.of(START_OF_TIME, Money.of(USD, 20)))
+            .build());
     persistContactsAndHosts();
     EppException thrown = assertThrows(FeesMismatchException.class, this::runFlow);
     assertAboutEppExceptions().that(thrown).marshalsToXml();
@@ -1079,49 +1132,32 @@ class DomainCreateFlowTest extends ResourceFlowTestCase<DomainCreateFlow, Domain
 
   @Test
   void testSuccess_wrongFeeAmountTooHigh_defaultToken_v06() throws Exception {
-    AllocationToken defaultToken =
-        persistResource(
-            new AllocationToken.Builder()
-                .setToken("bbbbb")
-                .setTokenType(DEFAULT_PROMO)
-                .setAllowedRegistrarIds(ImmutableSet.of("TheRegistrar"))
-                .setAllowedTlds(ImmutableSet.of("tld"))
-                .setDiscountFraction(0.5)
-                .build());
+    setupDefaultTokenWithDiscount();
     persistResource(
         Tld.get("tld")
             .asBuilder()
-            .setDefaultPromoTokens(ImmutableList.of(defaultToken.createVKey()))
-            .setCreateBillingCost(Money.of(USD, 8))
+            .setCreateBillingCostTransitions(ImmutableSortedMap.of(START_OF_TIME, Money.of(USD, 8)))
             .build());
-    // Expects fee of $26
+    // Expects fee of $24
     setEppInput("domain_create_fee.xml", ImmutableMap.of("FEE_VERSION", "0.6", "CURRENCY", "USD"));
     persistContactsAndHosts();
-    // $12 is equal to 50% off the first year registration and 0% 0ff the 2nd year
+    // $15 is 50% off the first year registration ($8) and 0% 0ff the 2nd year (renewal at $11)
     runFlowAssertResponse(
         loadFile(
             "domain_create_response_fee.xml",
-            ImmutableMap.of("FEE_VERSION", "0.6", "FEE", "12.00")));
+            ImmutableMap.of("FEE_VERSION", "0.6", "FEE", "15.00")));
   }
 
   @Test
   void testFailure_wrongFeeAmountTooLow_defaultToken_v06() throws Exception {
-    AllocationToken defaultToken =
-        persistResource(
-            new AllocationToken.Builder()
-                .setToken("bbbbb")
-                .setTokenType(DEFAULT_PROMO)
-                .setAllowedRegistrarIds(ImmutableSet.of("TheRegistrar"))
-                .setAllowedTlds(ImmutableSet.of("tld"))
-                .setDiscountFraction(0.5)
-                .build());
+    setupDefaultTokenWithDiscount();
     persistResource(
         Tld.get("tld")
             .asBuilder()
-            .setDefaultPromoTokens(ImmutableList.of(defaultToken.createVKey()))
-            .setCreateBillingCost(Money.of(USD, 100))
+            .setCreateBillingCostTransitions(
+                ImmutableSortedMap.of(START_OF_TIME, Money.of(USD, 100)))
             .build());
-    // Expects fee of $26
+    // Expects fee of $24
     setEppInput("domain_create_fee.xml", ImmutableMap.of("FEE_VERSION", "0.6", "CURRENCY", "USD"));
     persistContactsAndHosts();
     EppException thrown = assertThrows(FeesMismatchException.class, this::runFlow);
@@ -1131,7 +1167,12 @@ class DomainCreateFlowTest extends ResourceFlowTestCase<DomainCreateFlow, Domain
   @Test
   void testFailure_wrongFeeAmount_v11() {
     setEppInput("domain_create_fee.xml", ImmutableMap.of("FEE_VERSION", "0.11", "CURRENCY", "USD"));
-    persistResource(Tld.get("tld").asBuilder().setCreateBillingCost(Money.of(USD, 20)).build());
+    persistResource(
+        Tld.get("tld")
+            .asBuilder()
+            .setCreateBillingCostTransitions(
+                ImmutableSortedMap.of(START_OF_TIME, Money.of(USD, 20)))
+            .build());
     persistContactsAndHosts();
     EppException thrown = assertThrows(FeesMismatchException.class, this::runFlow);
     assertAboutEppExceptions().that(thrown).marshalsToXml();
@@ -1139,49 +1180,32 @@ class DomainCreateFlowTest extends ResourceFlowTestCase<DomainCreateFlow, Domain
 
   @Test
   void testSuccess_wrongFeeAmountTooHigh_defaultToken_v11() throws Exception {
-    AllocationToken defaultToken =
-        persistResource(
-            new AllocationToken.Builder()
-                .setToken("bbbbb")
-                .setTokenType(DEFAULT_PROMO)
-                .setAllowedRegistrarIds(ImmutableSet.of("TheRegistrar"))
-                .setAllowedTlds(ImmutableSet.of("tld"))
-                .setDiscountFraction(0.5)
-                .build());
+    setupDefaultTokenWithDiscount();
     persistResource(
         Tld.get("tld")
             .asBuilder()
-            .setDefaultPromoTokens(ImmutableList.of(defaultToken.createVKey()))
-            .setCreateBillingCost(Money.of(USD, 8))
+            .setCreateBillingCostTransitions(ImmutableSortedMap.of(START_OF_TIME, Money.of(USD, 8)))
             .build());
-    // Expects fee of $26
+    // Expects fee of $24
     setEppInput("domain_create_fee.xml", ImmutableMap.of("FEE_VERSION", "0.11", "CURRENCY", "USD"));
     persistContactsAndHosts();
     // $12 is equal to 50% off the first year registration and 0% 0ff the 2nd year
     runFlowAssertResponse(
         loadFile(
             "domain_create_response_fee.xml",
-            ImmutableMap.of("FEE_VERSION", "0.11", "FEE", "12.00")));
+            ImmutableMap.of("FEE_VERSION", "0.11", "FEE", "15.00")));
   }
 
   @Test
   void testFailure_wrongFeeAmountTooLow_defaultToken_v11() throws Exception {
-    AllocationToken defaultToken =
-        persistResource(
-            new AllocationToken.Builder()
-                .setToken("bbbbb")
-                .setTokenType(DEFAULT_PROMO)
-                .setAllowedRegistrarIds(ImmutableSet.of("TheRegistrar"))
-                .setAllowedTlds(ImmutableSet.of("tld"))
-                .setDiscountFraction(0.5)
-                .build());
+    setupDefaultTokenWithDiscount();
     persistResource(
         Tld.get("tld")
             .asBuilder()
-            .setDefaultPromoTokens(ImmutableList.of(defaultToken.createVKey()))
-            .setCreateBillingCost(Money.of(USD, 100))
+            .setCreateBillingCostTransitions(
+                ImmutableSortedMap.of(START_OF_TIME, Money.of(USD, 100)))
             .build());
-    // Expects fee of $26
+    // Expects fee of $24
     setEppInput("domain_create_fee.xml", ImmutableMap.of("FEE_VERSION", "0.11", "CURRENCY", "USD"));
     persistContactsAndHosts();
     EppException thrown = assertThrows(FeesMismatchException.class, this::runFlow);
@@ -1191,7 +1215,12 @@ class DomainCreateFlowTest extends ResourceFlowTestCase<DomainCreateFlow, Domain
   @Test
   void testFailure_wrongFeeAmount_v12() {
     setEppInput("domain_create_fee.xml", ImmutableMap.of("FEE_VERSION", "0.12", "CURRENCY", "USD"));
-    persistResource(Tld.get("tld").asBuilder().setCreateBillingCost(Money.of(USD, 20)).build());
+    persistResource(
+        Tld.get("tld")
+            .asBuilder()
+            .setCreateBillingCostTransitions(
+                ImmutableSortedMap.of(START_OF_TIME, Money.of(USD, 20)))
+            .build());
     persistContactsAndHosts();
     EppException thrown = assertThrows(FeesMismatchException.class, this::runFlow);
     assertAboutEppExceptions().that(thrown).marshalsToXml();
@@ -1199,49 +1228,32 @@ class DomainCreateFlowTest extends ResourceFlowTestCase<DomainCreateFlow, Domain
 
   @Test
   void testSuccess_wrongFeeAmountTooHigh_defaultToken_v12() throws Exception {
-    AllocationToken defaultToken =
-        persistResource(
-            new AllocationToken.Builder()
-                .setToken("bbbbb")
-                .setTokenType(DEFAULT_PROMO)
-                .setAllowedRegistrarIds(ImmutableSet.of("TheRegistrar"))
-                .setAllowedTlds(ImmutableSet.of("tld"))
-                .setDiscountFraction(0.5)
-                .build());
+    setupDefaultTokenWithDiscount();
     persistResource(
         Tld.get("tld")
             .asBuilder()
-            .setDefaultPromoTokens(ImmutableList.of(defaultToken.createVKey()))
-            .setCreateBillingCost(Money.of(USD, 8))
+            .setCreateBillingCostTransitions(ImmutableSortedMap.of(START_OF_TIME, Money.of(USD, 8)))
             .build());
-    // Expects fee of $26
+    // Expects fee of $24
     setEppInput("domain_create_fee.xml", ImmutableMap.of("FEE_VERSION", "0.12", "CURRENCY", "USD"));
     persistContactsAndHosts();
     // $12 is equal to 50% off the first year registration and 0% 0ff the 2nd year
     runFlowAssertResponse(
         loadFile(
             "domain_create_response_fee.xml",
-            ImmutableMap.of("FEE_VERSION", "0.12", "FEE", "12.00")));
+            ImmutableMap.of("FEE_VERSION", "0.12", "FEE", "15.00")));
   }
 
   @Test
   void testFailure_wrongFeeAmountTooLow_defaultToken_v12() throws Exception {
-    AllocationToken defaultToken =
-        persistResource(
-            new AllocationToken.Builder()
-                .setToken("bbbbb")
-                .setTokenType(DEFAULT_PROMO)
-                .setAllowedRegistrarIds(ImmutableSet.of("TheRegistrar"))
-                .setAllowedTlds(ImmutableSet.of("tld"))
-                .setDiscountFraction(0.5)
-                .build());
+    setupDefaultTokenWithDiscount();
     persistResource(
         Tld.get("tld")
             .asBuilder()
-            .setDefaultPromoTokens(ImmutableList.of(defaultToken.createVKey()))
-            .setCreateBillingCost(Money.of(USD, 100))
+            .setCreateBillingCostTransitions(
+                ImmutableSortedMap.of(START_OF_TIME, Money.of(USD, 100)))
             .build());
-    // Expects fee of $26
+    // Expects fee of $24
     setEppInput("domain_create_fee.xml", ImmutableMap.of("FEE_VERSION", "0.12", "CURRENCY", "USD"));
     persistContactsAndHosts();
     EppException thrown = assertThrows(FeesMismatchException.class, this::runFlow);
@@ -1338,6 +1350,7 @@ class DomainCreateFlowTest extends ResourceFlowTestCase<DomainCreateFlow, Domain
                 .setTokenType(SINGLE_USE)
                 .setDomainName("resdom.tld")
                 .setRenewalPriceBehavior(SPECIFIED)
+                .setRenewalPrice(Money.of(USD, 0))
                 .build());
     // Despite the domain being FULLY_BLOCKED, the non-superuser create succeeds the domain is also
     // RESERVED_FOR_SPECIFIC_USE and the correct allocation token is passed.
@@ -1582,20 +1595,20 @@ class DomainCreateFlowTest extends ResourceFlowTestCase<DomainCreateFlow, Domain
     BillingEvent billingEvent =
         Iterables.getOnlyElement(DatabaseHelper.loadAllOf(BillingEvent.class));
     assertThat(billingEvent.getTargetId()).isEqualTo("example.tld");
-    assertThat(billingEvent.getCost()).isEqualTo(Money.of(USD, BigDecimal.valueOf(19.5)));
+    assertThat(billingEvent.getCost()).isEqualTo(Money.of(USD, BigDecimal.valueOf(17.5)));
   }
 
   @Test
   void testSuccess_allocationToken_multiYearDiscount_maxesAtTokenDiscountYears() throws Exception {
-    // 2yrs @ $13 + 3yrs @ $13 * (1 - 0.73) = $36.53
-    runTest_allocationToken_multiYearDiscount(false, 0.73, 3, Money.of(USD, 36.53));
+    // ($13 + $11 + $11) *  (1 - 0.73) + 2 * $11 =
+    runTest_allocationToken_multiYearDiscount(false, 0.73, 3, Money.of(USD, 31.45));
   }
 
   @Test
   void testSuccess_allocationToken_multiYearDiscount_maxesAtNumRegistrationYears()
       throws Exception {
-    // 5yrs @ $13 * (1 - 0.276) = $47.06
-    runTest_allocationToken_multiYearDiscount(false, 0.276, 10, Money.of(USD, 47.06));
+    // ($13 + 4 * $11) * (1 - 0.276) = $41.27
+    runTest_allocationToken_multiYearDiscount(false, 0.276, 10, Money.of(USD, 41.27));
   }
 
   void runTest_allocationToken_multiYearDiscount(
@@ -1729,6 +1742,27 @@ class DomainCreateFlowTest extends ResourceFlowTestCase<DomainCreateFlow, Domain
   }
 
   @Test
+  void testSuccess_token_premiumDomainZeroPrice_noFeeExtension() throws Exception {
+    createTld("example");
+    persistContactsAndHosts();
+    persistResource(
+        new AllocationToken.Builder()
+            .setToken("abc123")
+            .setTokenType(SINGLE_USE)
+            .setDiscountFraction(1)
+            .setDiscountPremiums(true)
+            .setDomainName("rich.example")
+            .build());
+    setEppInput(
+        "domain_create_allocationtoken.xml",
+        ImmutableMap.of("YEARS", "1", "DOMAIN", "rich.example"));
+    // The response should be the standard successful create response, but with 1 year instead of 2
+    runFlowAssertResponse(
+        loadFile("domain_create_response.xml", ImmutableMap.of("DOMAIN", "rich.example"))
+            .replace("2001", "2000"));
+  }
+
+  @Test
   void testFailure_promotionNotActive() {
     persistContactsAndHosts();
     persistResource(
@@ -1802,28 +1836,8 @@ class DomainCreateFlowTest extends ResourceFlowTestCase<DomainCreateFlow, Domain
   @Test
   void testSuccess_usesDefaultToken() throws Exception {
     persistContactsAndHosts();
-    AllocationToken defaultToken1 =
-        persistResource(
-            new AllocationToken.Builder()
-                .setToken("aaaaa")
-                .setTokenType(DEFAULT_PROMO)
-                .setAllowedRegistrarIds(ImmutableSet.of("NewRegistrar"))
-                .setAllowedTlds(ImmutableSet.of("tld"))
-                .build());
-    AllocationToken defaultToken2 =
-        persistResource(
-            new AllocationToken.Builder()
-                .setToken("bbbbb")
-                .setTokenType(DEFAULT_PROMO)
-                .setAllowedRegistrarIds(ImmutableSet.of("TheRegistrar"))
-                .setAllowedTlds(ImmutableSet.of("tld"))
-                .build());
-    persistResource(
-        Tld.get("tld")
-            .asBuilder()
-            .setDefaultPromoTokens(
-                ImmutableList.of(defaultToken1.createVKey(), defaultToken2.createVKey()))
-            .build());
+    setupDefaultToken("aaaaa", 0, "NewRegistrar");
+    setupDefaultTokenWithDiscount();
     runTest_defaultToken("bbbbb");
   }
 
@@ -1836,28 +1850,8 @@ class DomainCreateFlowTest extends ResourceFlowTestCase<DomainCreateFlow, Domain
             .setTokenType(UNLIMITED_USE)
             .setDiscountFraction(0.5)
             .build());
-    AllocationToken defaultToken1 =
-        persistResource(
-            new AllocationToken.Builder()
-                .setToken("aaaaa")
-                .setTokenType(DEFAULT_PROMO)
-                .setAllowedRegistrarIds(ImmutableSet.of("NewRegistrar"))
-                .setAllowedTlds(ImmutableSet.of("tld"))
-                .build());
-    AllocationToken defaultToken2 =
-        persistResource(
-            new AllocationToken.Builder()
-                .setToken("bbbbb")
-                .setTokenType(DEFAULT_PROMO)
-                .setAllowedRegistrarIds(ImmutableSet.of("TheRegistrar"))
-                .setAllowedTlds(ImmutableSet.of("tld"))
-                .build());
-    persistResource(
-        Tld.get("tld")
-            .asBuilder()
-            .setDefaultPromoTokens(
-                ImmutableList.of(defaultToken1.createVKey(), defaultToken2.createVKey()))
-            .build());
+    setupDefaultToken("aaaaa", 0, "NewRegistrar");
+    setupDefaultTokenWithDiscount();
     clock.advanceOneMilli();
     setEppInput(
         "domain_create_allocationtoken.xml",
@@ -1867,185 +1861,56 @@ class DomainCreateFlowTest extends ResourceFlowTestCase<DomainCreateFlow, Domain
     BillingEvent billingEvent =
         Iterables.getOnlyElement(DatabaseHelper.loadAllOf(BillingEvent.class));
     assertThat(billingEvent.getTargetId()).isEqualTo("example.tld");
-    assertThat(billingEvent.getCost()).isEqualTo(Money.of(USD, BigDecimal.valueOf(19.5)));
+    assertThat(billingEvent.getCost()).isEqualTo(Money.of(USD, BigDecimal.valueOf(17.5)));
     assertThat(billingEvent.getAllocationToken().get().getKey()).isEqualTo("abc123");
   }
 
   @Test
   void testSuccess_noValidDefaultToken() throws Exception {
     persistContactsAndHosts();
-    AllocationToken defaultToken1 =
-        persistResource(
-            new AllocationToken.Builder()
-                .setToken("aaaaa")
-                .setTokenType(DEFAULT_PROMO)
-                .setAllowedRegistrarIds(ImmutableSet.of("NewRegistrar"))
-                .setAllowedTlds(ImmutableSet.of("tld"))
-                .build());
-    AllocationToken defaultToken2 =
-        persistResource(
-            new AllocationToken.Builder()
-                .setToken("bbbbb")
-                .setTokenType(DEFAULT_PROMO)
-                .setAllowedRegistrarIds(ImmutableSet.of("OtherRegistrar"))
-                .setAllowedTlds(ImmutableSet.of("tld"))
-                .build());
-    persistResource(
-        Tld.get("tld")
-            .asBuilder()
-            .setDefaultPromoTokens(
-                ImmutableList.of(defaultToken1.createVKey(), defaultToken2.createVKey()))
-            .build());
+    setupDefaultToken("aaaaa", 0, "NewRegistrar");
+    setupDefaultToken("bbbbb", 0, "OtherRegistrar");
     doSuccessfulTest();
   }
 
+  @Test
   void testSuccess_onlyUseFirstValidDefaultToken() throws Exception {
     persistContactsAndHosts();
-    AllocationToken defaultToken1 =
-        persistResource(
-            new AllocationToken.Builder()
-                .setToken("aaaaa")
-                .setTokenType(DEFAULT_PROMO)
-                .setAllowedRegistrarIds(ImmutableSet.of("NewRegistrar"))
-                .setAllowedTlds(ImmutableSet.of("tld"))
-                .build());
-    AllocationToken defaultToken2 =
-        persistResource(
-            new AllocationToken.Builder()
-                .setToken("bbbbb")
-                .setTokenType(DEFAULT_PROMO)
-                .setAllowedRegistrarIds(ImmutableSet.of("NewRegistrar"))
-                .setAllowedTlds(ImmutableSet.of("tld"))
-                .build());
-    persistResource(
-        Tld.get("tld")
-            .asBuilder()
-            .setDefaultPromoTokens(
-                ImmutableList.of(defaultToken1.createVKey(), defaultToken2.createVKey()))
-            .build());
+    setupDefaultToken("aaaaa", 0, "TheRegistrar");
+    setupDefaultTokenWithDiscount();
     runTest_defaultToken("aaaaa");
   }
 
+  @Test
   void testSuccess_registryHasDeletedDefaultToken() throws Exception {
     persistContactsAndHosts();
-    AllocationToken defaultToken1 =
-        persistResource(
-            new AllocationToken.Builder()
-                .setToken("aaaaa")
-                .setTokenType(DEFAULT_PROMO)
-                .setAllowedRegistrarIds(ImmutableSet.of("NewRegistrar"))
-                .setAllowedTlds(ImmutableSet.of("tld"))
-                .build());
-    AllocationToken defaultToken2 =
-        persistResource(
-            new AllocationToken.Builder()
-                .setToken("bbbbb")
-                .setTokenType(DEFAULT_PROMO)
-                .setAllowedRegistrarIds(ImmutableSet.of("TheRegistrar"))
-                .setAllowedTlds(ImmutableSet.of("tld"))
-                .build());
-    persistResource(
-        Tld.get("tld")
-            .asBuilder()
-            .setDefaultPromoTokens(
-                ImmutableList.of(defaultToken1.createVKey(), defaultToken2.createVKey()))
-            .build());
+    AllocationToken defaultToken1 = setupDefaultToken("aaaaa", 0, "NewRegistrar");
+    setupDefaultTokenWithDiscount();
     DatabaseHelper.deleteResource(defaultToken1);
-    runTest_defaultToken("bbbbb");
+    assertThat(runTest_defaultToken("bbbbb").getCost()).isEqualTo(Money.of(USD, 17.50));
   }
 
   @Test
   void testSuccess_defaultTokenAppliesCorrectPrice() throws Exception {
     persistContactsAndHosts();
-    AllocationToken defaultToken1 =
-        persistResource(
-            new AllocationToken.Builder()
-                .setToken("aaaaa")
-                .setTokenType(DEFAULT_PROMO)
-                .setAllowedRegistrarIds(ImmutableSet.of("NewRegistrar"))
-                .setAllowedTlds(ImmutableSet.of("tld"))
-                .build());
-    AllocationToken defaultToken2 =
-        persistResource(
-            new AllocationToken.Builder()
-                .setToken("bbbbb")
-                .setTokenType(DEFAULT_PROMO)
-                .setDiscountFraction(0.5)
-                .setAllowedRegistrarIds(ImmutableSet.of("TheRegistrar"))
-                .setAllowedTlds(ImmutableSet.of("tld"))
-                .build());
-    persistResource(
-        Tld.get("tld")
-            .asBuilder()
-            .setDefaultPromoTokens(
-                ImmutableList.of(defaultToken1.createVKey(), defaultToken2.createVKey()))
-            .build());
-    BillingEvent billingEvent = runTest_defaultToken("bbbbb");
-    assertThat(billingEvent.getCost()).isEqualTo(Money.of(USD, BigDecimal.valueOf(19.5)));
-  }
-
-  @Test
-  void testSuccess_skipsOverMissingDefaultToken() throws Exception {
-    persistContactsAndHosts();
-    AllocationToken defaultToken1 =
-        persistResource(
-            new AllocationToken.Builder()
-                .setToken("aaaaa")
-                .setTokenType(DEFAULT_PROMO)
-                .setAllowedRegistrarIds(ImmutableSet.of("NewRegistrar"))
-                .setAllowedTlds(ImmutableSet.of("tld"))
-                .build());
-    AllocationToken defaultToken2 =
-        persistResource(
-            new AllocationToken.Builder()
-                .setToken("bbbbb")
-                .setTokenType(DEFAULT_PROMO)
-                .setDiscountFraction(0.5)
-                .setAllowedRegistrarIds(ImmutableSet.of("TheRegistrar"))
-                .setAllowedTlds(ImmutableSet.of("tld"))
-                .build());
-    persistResource(
-        Tld.get("tld")
-            .asBuilder()
-            .setDefaultPromoTokens(
-                ImmutableList.of(defaultToken1.createVKey(), defaultToken2.createVKey()))
-            .build());
-    DatabaseHelper.deleteResource(defaultToken1);
-    BillingEvent billingEvent = runTest_defaultToken("bbbbb");
-    assertThat(billingEvent.getCost()).isEqualTo(Money.of(USD, BigDecimal.valueOf(19.5)));
+    setupDefaultToken("aaaaa", 0, "NewRegistrar");
+    setupDefaultTokenWithDiscount();
+    assertThat(runTest_defaultToken("bbbbb").getCost())
+        .isEqualTo(Money.of(USD, BigDecimal.valueOf(17.5)));
   }
 
   @Test
   void testSuccess_skipsOverExpiredDefaultToken() throws Exception {
     persistContactsAndHosts();
-    AllocationToken defaultToken1 =
-        persistResource(
-            new AllocationToken.Builder()
-                .setToken("aaaaa")
-                .setTokenType(DEFAULT_PROMO)
-                .setAllowedRegistrarIds(ImmutableSet.of("NewRegistrar"))
-                .setAllowedTlds(ImmutableSet.of("tld"))
-                .build());
-    AllocationToken defaultToken2 =
-        persistResource(
-            new AllocationToken.Builder()
-                .setToken("bbbbb")
-                .setTokenType(DEFAULT_PROMO)
-                .setDiscountFraction(0.5)
-                .setAllowedRegistrarIds(ImmutableSet.of("TheRegistrar"))
-                .setAllowedTlds(ImmutableSet.of("tld"))
-                .setTokenStatusTransitions(
-                    ImmutableSortedMap.<DateTime, TokenStatus>naturalOrder()
-                        .put(START_OF_TIME, TokenStatus.NOT_STARTED)
-                        .put(clock.nowUtc().minusDays(2), TokenStatus.VALID)
-                        .put(clock.nowUtc().minusDays(1), TokenStatus.ENDED)
-                        .build())
-                .build());
     persistResource(
-        Tld.get("tld")
+        setupDefaultTokenWithDiscount()
             .asBuilder()
-            .setDefaultPromoTokens(
-                ImmutableList.of(defaultToken1.createVKey(), defaultToken2.createVKey()))
+            .setTokenStatusTransitions(
+                ImmutableSortedMap.<DateTime, TokenStatus>naturalOrder()
+                    .put(START_OF_TIME, TokenStatus.NOT_STARTED)
+                    .put(clock.nowUtc().minusDays(2), TokenStatus.VALID)
+                    .put(clock.nowUtc().minusDays(1), TokenStatus.ENDED)
+                    .build())
             .build());
     doSuccessfulTest();
   }
@@ -2054,20 +1919,10 @@ class DomainCreateFlowTest extends ResourceFlowTestCase<DomainCreateFlow, Domain
   void testSuccess_doesNotApplyNonPremiumDefaultTokenToPremiumName() throws Exception {
     persistContactsAndHosts();
     createTld("example");
-    AllocationToken defaultToken1 =
-        persistResource(
-            new AllocationToken.Builder()
-                .setToken("aaaaa")
-                .setTokenType(DEFAULT_PROMO)
-                .setAllowedRegistrarIds(ImmutableSet.of("TheRegistrar"))
-                .setAllowedTlds(ImmutableSet.of("example"))
-                .setDiscountFraction(0.5)
-                .setDiscountPremiums(false)
-                .build());
     persistResource(
-        Tld.get("example")
+        setupDefaultTokenWithDiscount()
             .asBuilder()
-            .setDefaultPromoTokens(ImmutableList.of(defaultToken1.createVKey()))
+            .setAllowedTlds(ImmutableSet.of("example"))
             .build());
     setEppInput("domain_create_premium.xml");
     runFlowAssertResponse(
@@ -2077,7 +1932,7 @@ class DomainCreateFlowTest extends ResourceFlowTestCase<DomainCreateFlow, Domain
     assertSuccessfulCreate("example", ImmutableSet.of());
   }
 
-  BillingEvent runTest_defaultToken(String token) throws Exception {
+  private BillingEvent runTest_defaultToken(String token) throws Exception {
     setEppInput("domain_create.xml", ImmutableMap.of("DOMAIN", "example.tld"));
     runFlowAssertResponse(
         loadFile(
@@ -2352,11 +2207,39 @@ class DomainCreateFlowTest extends ResourceFlowTestCase<DomainCreateFlow, Domain
   }
 
   @Test
+  void testSuccess_minimumDatasetPhase1_missingRegistrant() throws Exception {
+    persistResource(
+        FeatureFlag.get(MINIMUM_DATASET_CONTACTS_OPTIONAL)
+            .asBuilder()
+            .setStatusMap(
+                ImmutableSortedMap.of(START_OF_TIME, INACTIVE, clock.nowUtc().minusDays(5), ACTIVE))
+            .build());
+    setEppInput("domain_create_missing_registrant.xml");
+    persistContactsAndHosts();
+    runFlowAssertResponse(
+        loadFile("domain_create_response.xml", ImmutableMap.of("DOMAIN", "example.tld")));
+  }
+
+  @Test
   void testFailure_missingAdmin() {
     setEppInput("domain_create_missing_admin.xml");
     persistContactsAndHosts();
     EppException thrown = assertThrows(MissingAdminContactException.class, this::runFlow);
     assertAboutEppExceptions().that(thrown).marshalsToXml();
+  }
+
+  @Test
+  void testSuccess_minimumDatasetPhase1_missingAdmin() throws Exception {
+    persistResource(
+        FeatureFlag.get(MINIMUM_DATASET_CONTACTS_OPTIONAL)
+            .asBuilder()
+            .setStatusMap(
+                ImmutableSortedMap.of(START_OF_TIME, INACTIVE, clock.nowUtc().minusDays(5), ACTIVE))
+            .build());
+    setEppInput("domain_create_missing_admin.xml");
+    persistContactsAndHosts();
+    runFlowAssertResponse(
+        loadFile("domain_create_response.xml", ImmutableMap.of("DOMAIN", "example.tld")));
   }
 
   @Test
@@ -2368,11 +2251,39 @@ class DomainCreateFlowTest extends ResourceFlowTestCase<DomainCreateFlow, Domain
   }
 
   @Test
+  void testSuccess_minimumDatasetPhase1_missingTech() throws Exception {
+    persistResource(
+        FeatureFlag.get(MINIMUM_DATASET_CONTACTS_OPTIONAL)
+            .asBuilder()
+            .setStatusMap(
+                ImmutableSortedMap.of(START_OF_TIME, INACTIVE, clock.nowUtc().minusDays(5), ACTIVE))
+            .build());
+    setEppInput("domain_create_missing_tech.xml");
+    persistContactsAndHosts();
+    runFlowAssertResponse(
+        loadFile("domain_create_response.xml", ImmutableMap.of("DOMAIN", "example.tld")));
+  }
+
+  @Test
   void testFailure_missingNonRegistrantContacts() {
     setEppInput("domain_create_missing_non_registrant_contacts.xml");
     persistContactsAndHosts();
     EppException thrown = assertThrows(MissingAdminContactException.class, this::runFlow);
     assertAboutEppExceptions().that(thrown).marshalsToXml();
+  }
+
+  @Test
+  void testSuccess_minimumDatasetPhase1_missingNonRegistrantContacts() throws Exception {
+    persistResource(
+        FeatureFlag.get(MINIMUM_DATASET_CONTACTS_OPTIONAL)
+            .asBuilder()
+            .setStatusMap(
+                ImmutableSortedMap.of(START_OF_TIME, INACTIVE, clock.nowUtc().minusDays(5), ACTIVE))
+            .build());
+    setEppInput("domain_create_missing_non_registrant_contacts.xml");
+    persistContactsAndHosts();
+    runFlowAssertResponse(
+        loadFile("domain_create_response.xml", ImmutableMap.of("DOMAIN", "example.tld")));
   }
 
   @Test
@@ -2563,6 +2474,167 @@ class DomainCreateFlowTest extends ResourceFlowTestCase<DomainCreateFlow, Domain
   }
 
   @Test
+  void testSuccess_bsaLabelMatch_notEnrolled() throws Exception {
+    persistResource(Tld.get("tld").asBuilder().setBsaEnrollStartTime(Optional.empty()).build());
+    persistBsaLabel("example");
+    persistContactsAndHosts();
+    doSuccessfulTest();
+  }
+
+  @Test
+  void testSuccess_bsaLabelMatch_notEnrolledYet() throws Exception {
+    persistResource(
+        Tld.get("tld")
+            .asBuilder()
+            .setBsaEnrollStartTime(Optional.of(clock.nowUtc().plusSeconds(1)))
+            .build());
+    persistBsaLabel("example");
+    persistContactsAndHosts();
+    doSuccessfulTest();
+  }
+
+  @Test
+  void testSuccess_blockedByBsa_hasRegisterBsaToken() throws Exception {
+    enrollTldInBsa();
+    allocationToken =
+        persistResource(
+            new AllocationToken.Builder()
+                .setToken("abc123")
+                .setTokenType(REGISTER_BSA)
+                .setDomainName("example.tld")
+                .build());
+    persistBsaLabel("example");
+    persistContactsAndHosts();
+    setEppInput(
+        "domain_create_allocationtoken.xml",
+        ImmutableMap.of("DOMAIN", "example.tld", "YEARS", "2"));
+    runFlow();
+    assertSuccessfulCreate("tld", ImmutableSet.of(), allocationToken);
+  }
+
+  @Test
+  void testSuccess_blockedByBsa_reservedDomain_viaAllocationTokenExtension() throws Exception {
+    enrollTldInBsa();
+    allocationToken =
+        persistResource(
+            new AllocationToken.Builder()
+                .setToken("abc123")
+                .setTokenType(REGISTER_BSA)
+                .setDomainName("resdom.tld")
+                .build());
+    persistBsaLabel("resdom");
+    setEppInput(
+        "domain_create_allocationtoken.xml", ImmutableMap.of("DOMAIN", "resdom.tld", "YEARS", "2"));
+    persistContactsAndHosts();
+    runFlowAssertResponse(
+        loadFile("domain_create_response.xml", ImmutableMap.of("DOMAIN", "resdom.tld")));
+    assertSuccessfulCreate("tld", ImmutableSet.of(RESERVED), allocationToken);
+    assertNoLordn();
+    assertAllocationTokenWasRedeemed("abc123");
+  }
+
+  @Test
+  void testSuccess_blockedByBsa_quietPeriod_skipTldStateCheckWithToken() throws Exception {
+    enrollTldInBsa();
+    AllocationToken token =
+        persistResource(
+            new AllocationToken.Builder()
+                .setToken("abc123")
+                .setTokenType(REGISTER_BSA)
+                .setRegistrationBehavior(RegistrationBehavior.BYPASS_TLD_STATE)
+                .setDomainName("example.tld")
+                .build());
+    persistContactsAndHosts();
+    persistBsaLabel("example");
+    setEppInput(
+        "domain_create_allocationtoken.xml",
+        ImmutableMap.of("DOMAIN", "example.tld", "YEARS", "2"));
+    persistResource(
+        Tld.get("tld")
+            .asBuilder()
+            .setTldStateTransitions(ImmutableSortedMap.of(START_OF_TIME, QUIET_PERIOD))
+            .build());
+    runFlow();
+    assertSuccessfulCreate("tld", ImmutableSet.of(), token);
+  }
+
+  @Test
+  void testSuccess_blockedByBsa_anchorTenant() throws Exception {
+    enrollTldInBsa();
+    allocationToken =
+        persistResource(
+            new AllocationToken.Builder()
+                .setToken("abcDEF23456")
+                .setTokenType(REGISTER_BSA)
+                .setDomainName("anchor.tld")
+                .build());
+    setEppInput("domain_create_anchor_allocationtoken.xml");
+    persistContactsAndHosts();
+    persistBsaLabel("anchor");
+    runFlowAssertResponse(loadFile("domain_create_anchor_response.xml"));
+    assertSuccessfulCreate("tld", ImmutableSet.of(ANCHOR_TENANT), allocationToken);
+    assertNoLordn();
+    assertAllocationTokenWasRedeemed("abcDEF23456");
+  }
+
+  @Test
+  void testFailure_blockedByBsa() throws Exception {
+    enrollTldInBsa();
+    persistBsaLabel("example");
+    persistContactsAndHosts();
+    EppException thrown = assertThrows(DomainLabelBlockedByBsaException.class, this::runFlow);
+    assertAboutEppExceptions()
+        .that(thrown)
+        .marshalsToXml()
+        .and()
+        .hasMessage("Domain label is blocked by the Brand Safety Alliance");
+    byte[] responseXmlBytes =
+        marshal(
+            EppOutput.create(
+                new EppResponse.Builder()
+                    .setTrid(Trid.create(null, "server-trid"))
+                    .setResult(thrown.getResult())
+                    .build()),
+            ValidationMode.STRICT);
+    assertThat(new String(responseXmlBytes, StandardCharsets.UTF_8))
+        .isEqualTo(loadFile("domain_create_blocked_by_bsa.xml"));
+  }
+
+  @Test
+  void testFailure_blockedByBsa_hasWrongToken() throws Exception {
+    enrollTldInBsa();
+    allocationToken =
+        persistResource(
+            new AllocationToken.Builder()
+                .setToken("abc123")
+                .setTokenType(SINGLE_USE)
+                .setRegistrationBehavior(RegistrationBehavior.BYPASS_TLD_STATE)
+                .setDomainName("example.tld")
+                .build());
+    persistBsaLabel("example");
+    persistContactsAndHosts();
+    setEppInput(
+        "domain_create_allocationtoken.xml",
+        ImmutableMap.of("DOMAIN", "example.tld", "YEARS", "2"));
+    EppException thrown = assertThrows(DomainLabelBlockedByBsaException.class, this::runFlow);
+    assertAboutEppExceptions()
+        .that(thrown)
+        .marshalsToXml()
+        .and()
+        .hasMessage("Domain label is blocked by the Brand Safety Alliance");
+    byte[] responseXmlBytes =
+        marshal(
+            EppOutput.create(
+                new EppResponse.Builder()
+                    .setTrid(Trid.create(null, "server-trid"))
+                    .setResult(thrown.getResult())
+                    .build()),
+            ValidationMode.STRICT);
+    assertThat(new String(responseXmlBytes, StandardCharsets.UTF_8))
+        .isEqualTo(loadFile("domain_create_blocked_by_bsa.xml"));
+  }
+
+  @Test
   void testFailure_uppercase() {
     doFailingDomainNameTest("Example.tld", BadDomainNameCharacterException.class);
   }
@@ -2584,7 +2656,7 @@ class DomainCreateFlowTest extends ResourceFlowTestCase<DomainCreateFlow, Domain
 
   @Test
   void testFailure_tooLong() {
-    doFailingDomainNameTest(Strings.repeat("a", 64) + ".tld", DomainLabelTooLongException.class);
+    doFailingDomainNameTest("a".repeat(64) + ".tld", DomainLabelTooLongException.class);
   }
 
   @Test
@@ -2805,7 +2877,8 @@ class DomainCreateFlowTest extends ResourceFlowTestCase<DomainCreateFlow, Domain
         Tld.get("tld")
             .asBuilder()
             .setCurrency(JPY)
-            .setCreateBillingCost(Money.ofMajor(JPY, 800))
+            .setCreateBillingCostTransitions(
+                ImmutableSortedMap.of(START_OF_TIME, Money.ofMajor(JPY, 800)))
             .setEapFeeSchedule(ImmutableSortedMap.of(START_OF_TIME, Money.ofMajor(JPY, 800)))
             .setRenewBillingCostTransitions(
                 ImmutableSortedMap.of(START_OF_TIME, Money.ofMajor(JPY, 800)))
@@ -2907,7 +2980,7 @@ class DomainCreateFlowTest extends ResourceFlowTestCase<DomainCreateFlow, Domain
         new ImmutableMap.Builder<String, String>()
             .put("FEE_VERSION", "0.6")
             .put("DESCRIPTION_1", "create")
-            .put("FEE_1", "26")
+            .put("FEE_1", "24")
             .put("DESCRIPTION_2", "Early Access Period")
             .put("FEE_2", "100")
             .put("DESCRIPTION_3", "renew")
@@ -2916,7 +2989,7 @@ class DomainCreateFlowTest extends ResourceFlowTestCase<DomainCreateFlow, Domain
     persistContactsAndHosts();
     setEapForTld("tld");
     EppException thrown = assertThrows(FeesMismatchException.class, this::runFlow);
-    assertThat(thrown).hasMessageThat().contains("expected total of USD 126.00");
+    assertThat(thrown).hasMessageThat().contains("expected total of USD 124.00");
     assertAboutEppExceptions().that(thrown).marshalsToXml();
   }
 
@@ -2927,7 +3000,7 @@ class DomainCreateFlowTest extends ResourceFlowTestCase<DomainCreateFlow, Domain
         new ImmutableMap.Builder<String, String>()
             .put("FEE_VERSION", "0.6")
             .put("DESCRIPTION_1", "create")
-            .put("FEE_1", "26")
+            .put("FEE_1", "24")
             .put("DESCRIPTION_2", "Early Access Period")
             .put("FEE_2", "55")
             .put("DESCRIPTION_3", "Early Access Period")
@@ -2947,7 +3020,7 @@ class DomainCreateFlowTest extends ResourceFlowTestCase<DomainCreateFlow, Domain
         new ImmutableMap.Builder<String, String>()
             .put("FEE_VERSION", "0.6")
             .put("DESCRIPTION_1", "create")
-            .put("FEE_1", "26")
+            .put("FEE_1", "24")
             .put("DESCRIPTION_2", "Early Access Period")
             .put("FEE_2", "55")
             .put("DESCRIPTION_3", "Early Access Period")
@@ -3158,126 +3231,62 @@ class DomainCreateFlowTest extends ResourceFlowTestCase<DomainCreateFlow, Domain
   }
 
   @Test
-  void testGetRenewalPriceInfo_isAnchorTenantWithoutToken_returnsNonPremiumAndNullPrice() {
-    assertThat(
-            DomainCreateFlow.getRenewalPriceInfo(
-                true,
-                Optional.empty(),
-                new FeesAndCredits.Builder()
-                    .setCurrency(USD)
-                    .addFeeOrCredit(Fee.create(BigDecimal.valueOf(0), FeeType.CREATE, false))
-                    .build()))
-        .isEqualTo(RenewalPriceInfo.create(NONPREMIUM, null));
-  }
-
-  @Test
-  void testGetRenewalPriceInfo_isAnchorTenantWithDefaultToken_returnsNonPremiumAndNullPrice() {
-    assertThat(
-            DomainCreateFlow.getRenewalPriceInfo(
-                true,
-                Optional.of(allocationToken),
-                new FeesAndCredits.Builder()
-                    .setCurrency(USD)
-                    .addFeeOrCredit(Fee.create(BigDecimal.valueOf(0), FeeType.CREATE, false))
-                    .build()))
-        .isEqualTo(RenewalPriceInfo.create(NONPREMIUM, null));
-  }
-
-  @Test
-  void testGetRenewalPriceInfo_isNotAnchorTenantWithDefaultToken_returnsDefaultAndNullPrice() {
-    assertThat(
-            DomainCreateFlow.getRenewalPriceInfo(
-                false,
-                Optional.of(allocationToken),
-                new FeesAndCredits.Builder()
-                    .setCurrency(USD)
-                    .addFeeOrCredit(Fee.create(BigDecimal.valueOf(100), FeeType.CREATE, false))
-                    .build()))
-        .isEqualTo(RenewalPriceInfo.create(DEFAULT, null));
-  }
-
-  @Test
-  void testGetRenewalPriceInfo_isNotAnchorTenantWithoutToken_returnsDefaultAndNullPrice() {
-    assertThat(
-            DomainCreateFlow.getRenewalPriceInfo(
-                false,
-                Optional.empty(),
-                new FeesAndCredits.Builder()
-                    .setCurrency(USD)
-                    .addFeeOrCredit(Fee.create(BigDecimal.valueOf(100), FeeType.CREATE, false))
-                    .build()))
-        .isEqualTo(RenewalPriceInfo.create(DEFAULT, null));
-  }
-
-  @Test
-  void
-      testGetRenewalPriceInfo_isNotAnchorTenantWithSpecifiedInToken_returnsSpecifiedAndCreatePrice() {
+  void testSuccess_anchorTenant_nonPremiumRenewal() throws Exception {
     AllocationToken token =
         persistResource(
             new AllocationToken.Builder()
                 .setToken("abc123")
                 .setTokenType(SINGLE_USE)
-                .setRenewalPriceBehavior(SPECIFIED)
+                .setDomainName("example.tld")
+                .setRegistrationBehavior(RegistrationBehavior.ANCHOR_TENANT)
                 .build());
-    assertThat(
-            DomainCreateFlow.getRenewalPriceInfo(
-                false,
-                Optional.of(token),
-                new FeesAndCredits.Builder()
-                    .setCurrency(USD)
-                    .addFeeOrCredit(Fee.create(BigDecimal.valueOf(100), FeeType.CREATE, false))
-                    .build()))
-        .isEqualTo(RenewalPriceInfo.create(SPECIFIED, Money.of(USD, 100)));
+    persistContactsAndHosts();
+    setEppInput(
+        "domain_create_allocationtoken.xml",
+        ImmutableMap.of("DOMAIN", "example.tld", "YEARS", "2"));
+    runFlow();
+    assertSuccessfulCreate("tld", ImmutableSet.of(ANCHOR_TENANT), token);
   }
 
   @Test
-  void testGetRenewalPriceInfo_isAnchorTenantWithSpecifiedStateInToken_throwsError() {
-    IllegalArgumentException thrown =
-        assertThrows(
-            IllegalArgumentException.class,
-            () ->
-                DomainCreateFlow.getRenewalPriceInfo(
-                    true,
-                    Optional.of(
-                        persistResource(
-                            new AllocationToken.Builder()
-                                .setToken("abc123")
-                                .setTokenType(SINGLE_USE)
-                                .setRenewalPriceBehavior(SPECIFIED)
-                                .build())),
-                    new FeesAndCredits.Builder()
-                        .setCurrency(USD)
-                        .addFeeOrCredit(Fee.create(BigDecimal.valueOf(0), FeeType.CREATE, true))
-                        .build()));
-    assertThat(thrown)
-        .hasMessageThat()
-        .isEqualTo("Renewal price behavior cannot be SPECIFIED for anchor tenant");
+  void testSuccess_nonAnchorTenant_nonPremiumRenewal() throws Exception {
+    createTld("example");
+    AllocationToken token =
+        persistResource(
+            new AllocationToken.Builder()
+                .setToken("abc123")
+                .setTokenType(SINGLE_USE)
+                .setDomainName("rich.example")
+                .setRenewalPriceBehavior(NONPREMIUM)
+                .build());
+    persistContactsAndHosts();
+    // Creation is still $100 but it'll create a NONPREMIUM renewal
+    setEppInput(
+        "domain_create_premium_allocationtoken.xml",
+        ImmutableMap.of("YEARS", "2", "FEE", "111.00"));
+    runFlow();
+    assertSuccessfulCreate("example", ImmutableSet.of(), token);
   }
 
   @Test
-  void testGetRenewalPriceInfo_withInvalidRenewalPriceBehavior_throwsError() {
-    IllegalArgumentException thrown =
-        assertThrows(
-            IllegalArgumentException.class,
-            () ->
-                DomainCreateFlow.getRenewalPriceInfo(
-                    true,
-                    Optional.of(
-                        persistResource(
-                            new AllocationToken.Builder()
-                                .setToken("abc123")
-                                .setTokenType(SINGLE_USE)
-                                .setRenewalPriceBehavior(RenewalPriceBehavior.valueOf("INVALID"))
-                                .build())),
-                    new FeesAndCredits.Builder()
-                        .setCurrency(USD)
-                        .addFeeOrCredit(Fee.create(BigDecimal.valueOf(0), FeeType.CREATE, true))
-                        .build()));
-    assertThat(thrown)
-        .hasMessageThat()
-        .isEqualTo(
-            "No enum constant"
-                + " google.registry.model.billing.BillingBase.RenewalPriceBehavior.INVALID");
+  void testSuccess_specifiedRenewalPriceToken_specifiedRecurrencePrice() throws Exception {
+    createTld("example");
+    AllocationToken token =
+        persistResource(
+            new AllocationToken.Builder()
+                .setToken("abc123")
+                .setTokenType(SINGLE_USE)
+                .setDomainName("rich.example")
+                .setRenewalPriceBehavior(SPECIFIED)
+                .setRenewalPrice(Money.of(USD, 1))
+                .build());
+    persistContactsAndHosts();
+    // Creation is still $100 but it'll create a $1 renewal
+    setEppInput(
+        "domain_create_premium_allocationtoken.xml",
+        ImmutableMap.of("YEARS", "2", "FEE", "101.00"));
+    runFlow();
+    assertSuccessfulCreate("example", ImmutableSet.of(), token);
   }
 
   @Test
@@ -3322,6 +3331,22 @@ class DomainCreateFlowTest extends ResourceFlowTestCase<DomainCreateFlow, Domain
             .build());
     runFlow();
     assertSuccessfulCreate("tld", ImmutableSet.of(), token);
+  }
+
+  @Test
+  void testSuccess_nonpremiumCreateToken() throws Exception {
+    createTld("example");
+    persistContactsAndHosts();
+    persistResource(
+        new AllocationToken.Builder()
+            .setToken("abc123")
+            .setTokenType(SINGLE_USE)
+            .setRegistrationBehavior(RegistrationBehavior.NONPREMIUM_CREATE)
+            .setDomainName("rich.example")
+            .build());
+    setEppInput(
+        "domain_create_premium_allocationtoken.xml", ImmutableMap.of("YEARS", "1", "FEE", "13.00"));
+    runFlowAssertResponse(loadFile("domain_create_nonpremium_token_response.xml"));
   }
 
   @Test
@@ -3680,10 +3705,12 @@ class DomainCreateFlowTest extends ResourceFlowTestCase<DomainCreateFlow, Domain
             new AllocationToken.Builder()
                 .setToken("abc123")
                 .setTokenType(BULK_PRICING)
+                .setDiscountFraction(1.0)
                 .setAllowedRegistrarIds(ImmutableSet.of("TheRegistrar"))
                 .setAllowedTlds(ImmutableSet.of("tld"))
                 .setAllowedEppActions(ImmutableSet.of(CommandName.CREATE))
                 .setRenewalPriceBehavior(SPECIFIED)
+                .setRenewalPrice(Money.of(USD, 0))
                 .build());
     persistContactsAndHosts();
     setEppInput(
@@ -3708,10 +3735,12 @@ class DomainCreateFlowTest extends ResourceFlowTestCase<DomainCreateFlow, Domain
         new AllocationToken.Builder()
             .setToken("abc123")
             .setTokenType(BULK_PRICING)
+            .setDiscountFraction(1.0)
             .setAllowedRegistrarIds(ImmutableSet.of("TheRegistrar"))
             .setAllowedEppActions(ImmutableSet.of(CommandName.CREATE))
             .setAllowedTlds(ImmutableSet.of("tld"))
             .setRenewalPriceBehavior(SPECIFIED)
+            .setRenewalPrice(Money.of(USD, 0))
             .build());
     persistContactsAndHosts();
     setEppInput(
@@ -3723,5 +3752,97 @@ class DomainCreateFlowTest extends ResourceFlowTestCase<DomainCreateFlow, Domain
         .hasMessageThat()
         .isEqualTo(
             "The bulk token abc123 cannot be used to register names for longer than 1 year.");
+  }
+
+  @Test
+  void testTieredPricingPromoResponse() throws Exception {
+    sessionMetadata.setRegistrarId("NewRegistrar");
+    setupDefaultTokenWithDiscount("NewRegistrar");
+    setEppInput("domain_create_fee.xml", ImmutableMap.of("FEE_VERSION", "0.12", "CURRENCY", "USD"));
+    persistContactsAndHosts();
+
+    // Fee in the result should be 24 (create cost of 13 plus renew cost of 11) even though the
+    // actual cost is lower (due to the tiered pricing promo)
+    runFlowAssertResponse(
+        loadFile(
+            "domain_create_response_fee.xml",
+            ImmutableMap.of("FEE_VERSION", "0.12", "FEE", "24.00")));
+    // Expected cost is half off the create cost (13/2 == 6.50) plus one full-cost renew (11)
+    assertThat(Iterables.getOnlyElement(loadAllOf(BillingEvent.class)).getCost())
+        .isEqualTo(Money.of(USD, 17.50));
+  }
+
+  @Test
+  void testTieredPricingPromo_registrarNotIncluded_standardResponse() throws Exception {
+    setupDefaultTokenWithDiscount("NewRegistrar");
+    setEppInput("domain_create_fee.xml", ImmutableMap.of("FEE_VERSION", "0.12", "CURRENCY", "USD"));
+    persistContactsAndHosts();
+
+    // For a registrar not included in the tiered pricing promo, costs should be 24
+    runFlowAssertResponse(
+        loadFile(
+            "domain_create_response_fee.xml",
+            ImmutableMap.of("FEE_VERSION", "0.12", "FEE", "24.00")));
+    assertThat(Iterables.getOnlyElement(loadAllOf(BillingEvent.class)).getCost())
+        .isEqualTo(Money.of(USD, 24));
+  }
+
+  @Test
+  void testTieredPricingPromo_registrarIncluded_noTokenActive() throws Exception {
+    sessionMetadata.setRegistrarId("NewRegistrar");
+    persistActiveDomain("example1.tld");
+
+    persistResource(
+        setupDefaultTokenWithDiscount("NewRegistrar")
+            .asBuilder()
+            .setTokenStatusTransitions(
+                ImmutableSortedMap.of(
+                    START_OF_TIME,
+                    TokenStatus.NOT_STARTED,
+                    clock.nowUtc().plusDays(1),
+                    TokenStatus.VALID))
+            .build());
+
+    setEppInput("domain_create_fee.xml", ImmutableMap.of("FEE_VERSION", "0.12", "CURRENCY", "USD"));
+    persistContactsAndHosts();
+
+    // The token hasn't started yet, so the cost should be create (13) plus renew (11)
+    runFlowAssertResponse(
+        loadFile(
+            "domain_create_response_fee.xml",
+            ImmutableMap.of("FEE_VERSION", "0.12", "FEE", "24.00")));
+    assertThat(Iterables.getOnlyElement(loadAllOf(BillingEvent.class)).getCost())
+        .isEqualTo(Money.of(USD, 24));
+  }
+
+  private AllocationToken setupDefaultTokenWithDiscount() {
+    return setupDefaultTokenWithDiscount("TheRegistrar");
+  }
+
+  private AllocationToken setupDefaultTokenWithDiscount(String registrarId) {
+    return setupDefaultToken("bbbbb", 0.5, registrarId);
+  }
+
+  private AllocationToken setupDefaultToken(
+      String token, double discountFraction, String registrarId) {
+    AllocationToken allocationToken =
+        persistResource(
+            new AllocationToken.Builder()
+                .setToken(token)
+                .setTokenType(DEFAULT_PROMO)
+                .setAllowedRegistrarIds(ImmutableSet.of(registrarId))
+                .setAllowedTlds(ImmutableSet.of("tld"))
+                .setDiscountFraction(discountFraction)
+                .build());
+    Tld tld = Tld.get("tld");
+    persistResource(
+        tld.asBuilder()
+            .setDefaultPromoTokens(
+                ImmutableList.<VKey<AllocationToken>>builder()
+                    .addAll(tld.getDefaultPromoTokens())
+                    .add(allocationToken.createVKey())
+                    .build())
+            .build());
+    return allocationToken;
   }
 }

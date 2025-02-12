@@ -18,7 +18,7 @@ import static com.google.common.base.Preconditions.checkArgument;
 import static com.google.common.base.Preconditions.checkState;
 import static com.google.common.base.Strings.emptyToNull;
 import static com.google.common.collect.Iterables.getOnlyElement;
-import static google.registry.model.registrar.Registrar.State.ACTIVE;
+import static google.registry.model.registrar.RegistrarBase.State.ACTIVE;
 import static google.registry.tools.RegistryToolEnvironment.PRODUCTION;
 import static google.registry.tools.RegistryToolEnvironment.SANDBOX;
 import static google.registry.tools.RegistryToolEnvironment.UNITTEST;
@@ -30,8 +30,8 @@ import com.beust.jcommander.Parameter;
 import com.beust.jcommander.Parameters;
 import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Streams;
-import google.registry.config.RegistryEnvironment;
 import google.registry.model.registrar.Registrar;
+import google.registry.util.RegistryEnvironment;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
@@ -81,9 +81,7 @@ final class CreateRegistrarCommand extends CreateOrUpdateRegistrarCommand
           clientId);
     }
     checkState(
-        !Registrar.loadByRegistrarId(clientId).isPresent(),
-        "Registrar %s already exists",
-        clientId);
+        Registrar.loadByRegistrarId(clientId).isEmpty(), "Registrar %s already exists", clientId);
     List<Registrar> collisions =
         Streams.stream(Registrar.loadAll())
             .filter(registrar -> normalizeRegistrarId(registrar.getRegistrarId()).equals(clientId))

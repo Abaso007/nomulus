@@ -15,7 +15,6 @@
 package google.registry.tools;
 
 import static com.google.common.truth.Truth.assertThat;
-import static java.nio.charset.StandardCharsets.UTF_8;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.Mockito.when;
 
@@ -26,7 +25,7 @@ import com.google.api.client.googleapis.auth.oauth2.GoogleClientSecrets;
 import com.google.api.client.http.GenericUrl;
 import com.google.api.client.http.HttpRequest;
 import com.google.api.client.http.javanet.NetHttpTransport;
-import com.google.api.client.json.jackson2.JacksonFactory;
+import com.google.api.client.json.gson.GsonFactory;
 import com.google.api.client.util.store.AbstractDataStoreFactory;
 import com.google.api.client.util.store.DataStore;
 import com.google.common.collect.ImmutableList;
@@ -72,9 +71,9 @@ class AuthModuleTest {
                 }
               })
           // We need to set the following fields because they are checked when
-          // Credential#setRefreshToken is called. However they are not actually persisted in the
+          // Credential#setRefreshToken is called. However, they are not actually persisted in the
           // DataStore and not actually used in tests.
-          .setJsonFactory(new JacksonFactory())
+          .setJsonFactory(new GsonFactory())
           .setTransport(new NetHttpTransport())
           .setTokenServerUrl(new GenericUrl("https://accounts.google.com/o/oauth2/token"))
           .setClientAuthentication(new ClientParametersAuthentication(CLIENT_ID, CLIENT_SECRET))
@@ -104,7 +103,7 @@ class AuthModuleTest {
         AuthModule.provideClientScopeQualifier("client-id", ImmutableList.of("foo", "bar"));
 
     // If we change the way we encode client id and scopes, this assertion will break.  That's
-    // probably ok and you can just change the text.  The things you have to be aware of are:
+    // probably ok, and you can just change the text.  The things you have to be aware of are:
     // - Names in the new encoding should have a low risk of collision with the old encoding.
     // - Changing the encoding will force all OAuth users of the nomulus tool to do a new login
     //   (existing credentials will not be used).
@@ -146,7 +145,7 @@ class AuthModuleTest {
   private Credential getCredential() {
     // Reconstruct the entire dependency graph, injecting FakeDataStoreFactory and credential
     // parameters.
-    JacksonFactory jsonFactory = new JacksonFactory();
+    GsonFactory jsonFactory = new GsonFactory();
     GoogleClientSecrets clientSecrets = getSecrets();
     ImmutableList<String> scopes = ImmutableList.of("scope1");
     return AuthModule.provideCredential(
@@ -155,7 +154,7 @@ class AuthModuleTest {
         AuthModule.provideClientScopeQualifier(AuthModule.provideClientId(clientSecrets), scopes));
   }
 
-  private GoogleClientSecrets getSecrets() {
+  private static GoogleClientSecrets getSecrets() {
     return new GoogleClientSecrets()
         .setInstalled(
             AuthModule.provideDefaultInstalledDetails()
@@ -166,7 +165,8 @@ class AuthModuleTest {
   @Test
   void test_provideLocalCredentialJson() {
     String credentialJson =
-        AuthModule.provideLocalCredentialJson(this::getSecrets, this::getCredential, null);
+        AuthModule.provideLocalCredentialJson(
+            AuthModuleTest::getSecrets, this::getCredential, null);
     Map<String, String> jsonMap =
         new Gson().fromJson(credentialJson, new TypeToken<Map<String, String>>() {}.getType());
     assertThat(jsonMap.get("type")).isEqualTo("authorized_user");
@@ -179,10 +179,10 @@ class AuthModuleTest {
   @MockitoSettings(strictness = Strictness.LENIENT)
   void test_provideExternalCredentialJson() throws Exception {
     File credentialFile = folder.resolve("credential.json").toFile();
-    Files.write(credentialFile.toPath(), "{some_field: some_value}".getBytes(UTF_8));
+    Files.writeString(credentialFile.toPath(), "{some_field: some_value}");
     String credentialJson =
         AuthModule.provideLocalCredentialJson(
-            this::getSecrets, this::getCredential, credentialFile.getCanonicalPath());
+            AuthModuleTest::getSecrets, this::getCredential, credentialFile.getCanonicalPath());
     assertThat(credentialJson).isEqualTo("{some_field: some_value}");
   }
 

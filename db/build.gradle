@@ -14,8 +14,16 @@ import org.gradle.process.internal.ExecException
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+buildscript {
+  dependencies {
+    def deps = rootProject.dependencyMap
+
+    classpath  deps['org.flywaydb:flyway-database-postgresql']
+  }
+}
+
 plugins {
-  id "org.flywaydb.flyway" version "6.0.1"
+  id "org.flywaydb.flyway" version "11.0.1"
   id 'maven-publish'
 }
 
@@ -147,6 +155,15 @@ publishing {
 
 flyway {
   def accessInfo = project.ext.getJdbcAccessInfo()
+  // Below config is required when adding an index concurrently using the
+  // `flywayMigrate` Gradle task. However it is  currently broken and an
+  // `unknonw property` exception is thrown. Disabling it for now since we
+  // do not expect adding indexes concurrently very often.
+  // See also: https://github.com/flyway/flyway/issues/3858
+  //
+  // pluginConfiguration = [
+  //         postgresqlTransactionalLock: 'false'
+  // ]
 
   url = accessInfo.url
   user = accessInfo.user
@@ -160,6 +177,8 @@ dependencies {
   def deps = rootProject.dependencyMap
 
   implementation deps['org.flywaydb:flyway-core']
+  implementation deps['org.flywaydb:flyway-database-postgresql']
+  implementation deps['org.testcontainers:testcontainers']
 
   runtimeOnly deps['com.google.cloud.sql:postgres-socket-factory']
   runtimeOnly deps['org.postgresql:postgresql']
@@ -168,12 +187,10 @@ dependencies {
   testRuntimeOnly deps['com.google.flogger:flogger-system-backend']
   testImplementation deps['com.google.guava:guava']
   testImplementation deps['com.google.truth:truth']
-  testImplementation deps['com.google.truth.extensions:truth-java8-extension']
   testRuntimeOnly deps['io.github.java-diff-utils:java-diff-utils']
   testImplementation deps['org.junit.jupiter:junit-jupiter-api']
   testImplementation deps['org.junit.jupiter:junit-jupiter-engine']
-  testImplementation deps['org.testcontainers:postgresql']
-  testImplementation deps['org.testcontainers:testcontainers']
+  testImplementation deps['org.junit.platform:junit-platform-launcher']
   testImplementation deps['org.testcontainers:junit-jupiter']
   testImplementation deps['org.testcontainers:postgresql']
   testImplementation project(path: ':common', configuration: 'testing')

@@ -37,6 +37,7 @@ import google.registry.networking.module.CertificateSupplierModule;
 import google.registry.networking.module.CertificateSupplierModule.Mode;
 import google.registry.proxy.EppProtocolModule.EppProtocol;
 import google.registry.proxy.HealthCheckProtocolModule.HealthCheckProtocol;
+import google.registry.proxy.HttpsRelayProtocolModule.HttpsRelayProtocol;
 import google.registry.proxy.Protocol.FrontendProtocol;
 import google.registry.proxy.ProxyConfig.Environment;
 import google.registry.proxy.WebWhoisProtocolsModule.HttpWhoisProtocol;
@@ -44,6 +45,7 @@ import google.registry.proxy.WebWhoisProtocolsModule.HttpsWhoisProtocol;
 import google.registry.proxy.WhoisProtocolModule.WhoisProtocol;
 import google.registry.proxy.handler.ProxyProtocolHandler;
 import google.registry.util.Clock;
+import google.registry.util.GcpJsonFormatter;
 import google.registry.util.GoogleCredentialsBundle;
 import google.registry.util.JdkLoggerConfig;
 import google.registry.util.OidcTokenUtils;
@@ -91,6 +93,13 @@ public class ProxyModule {
   @Parameter(names = "--https_whois", description = "Port for HTTPS WHOIS")
   private Integer httpsWhoisPort;
 
+  @Parameter(
+      names = "--local",
+      description =
+          "Whether EPP/WHOIS traffic should be forwarded to localhost using HTTP on port defined in"
+              + " httpsRelay.localPort")
+  private boolean local = false;
+
   @Parameter(names = "--env", description = "Environment to run the proxy in")
   private Environment env = Environment.LOCAL;
 
@@ -130,8 +139,7 @@ public class ProxyModule {
       // "io.netty.handler.logging.LoggingHandler" to actually process the logs. This JUL logger is
       // set to Level.FINE if the --log parameter is passed, so that it does not filter out logs
       // that the LoggingHandler writes. Otherwise, the logs are silently ignored because the
-      // default
-      // JUL logger level is Level.INFO.
+      // default JUL logger level is Level.INFO.
       JdkLoggerConfig.getConfig(LoggingHandler.class).setLevel(Level.FINE);
       // Log source IP information if --log parameter is passed. This is considered PII and should
       // only be used in non-production environment for debugging purpose.
@@ -166,6 +174,13 @@ public class ProxyModule {
   @Singleton
   String provideClientId(ProxyConfig config) {
     return config.oauthClientId;
+  }
+
+  @Provides
+  @HttpsRelayProtocol
+  @Singleton
+  boolean provideIsLocal() {
+    return local;
   }
 
   @Provides
@@ -204,7 +219,7 @@ public class ProxyModule {
   }
 
   /**
-   * Provides shared logging handler.
+   * Provides a shared logging handler.
    *
    * <p>Note that this handler always records logs at {@code LogLevel.DEBUG}, it is up to the JUL
    * logger that it contains to decide if logs at this level should actually be captured. The log
@@ -261,6 +276,13 @@ public class ProxyModule {
       GoogleCredentialsBundle credentialsBundle, @Named("oauthClientId") String clientId) {
     return Suppliers.memoizeWithExpiration(
         () -> OidcTokenUtils.createOidcToken(credentialsBundle, clientId), 1, TimeUnit.HOURS);
+  }
+
+  @Singleton
+  @Provides
+  @Named("canary")
+  boolean provideIsCanary(Environment env) {
+    return env.name().endsWith("_CANARY");
   }
 
   @Singleton

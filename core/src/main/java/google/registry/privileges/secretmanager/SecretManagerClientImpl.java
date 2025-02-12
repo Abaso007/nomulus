@@ -94,7 +94,7 @@ public class SecretManagerClientImpl implements SecretManagerClient {
 
   private static SecretVersionState toSecretVersionState(SecretVersion secretVersion) {
     SecretVersionName name = SecretVersionName.parse(secretVersion.getName());
-    return SecretVersionState.of(
+    return SecretVersionState.create(
         name.getSecret(), name.getSecretVersion(), secretVersion.getState());
   }
 
@@ -165,12 +165,9 @@ public class SecretManagerClientImpl implements SecretManagerClient {
       return retrier.callWithRetry(callable, SecretManagerClientImpl::isRetryableException);
     } catch (ApiException e) {
       switch (e.getStatusCode().getCode()) {
-        case ALREADY_EXISTS:
-          throw new SecretAlreadyExistsException(e);
-        case NOT_FOUND:
-          throw new NoSuchSecretResourceException(e);
-        default:
-          throw new SecretManagerException(e);
+        case ALREADY_EXISTS -> throw new SecretAlreadyExistsException(e);
+        case NOT_FOUND -> throw new NoSuchSecretResourceException(e);
+        default -> throw new SecretManagerException(e);
       }
     }
   }

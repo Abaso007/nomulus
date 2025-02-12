@@ -29,12 +29,13 @@ import com.google.common.collect.Iterators;
 import com.google.common.flogger.FluentLogger;
 import com.google.protobuf.Timestamp;
 import google.registry.batch.CloudTasksUtils;
-import google.registry.config.RegistryEnvironment;
+import google.registry.flows.EppToolAction;
 import google.registry.request.Action;
-import google.registry.request.Action.Service;
+import google.registry.request.Action.GaeService;
 import google.registry.request.Parameter;
 import google.registry.request.auth.Auth;
 import google.registry.security.XsrfTokenManager;
+import google.registry.util.RegistryEnvironment;
 import java.time.Instant;
 import java.util.Arrays;
 import java.util.Iterator;
@@ -54,11 +55,11 @@ import org.joda.time.DateTime;
  * least one must be specified in order for load testing to do anything.
  */
 @Action(
-    service = Action.Service.TOOLS,
+    service = GaeService.TOOLS,
     path = LoadTestAction.PATH,
     method = Action.Method.POST,
     automaticallyPrintOk = true,
-    auth = Auth.AUTH_API_ADMIN)
+    auth = Auth.AUTH_ADMIN)
 public class LoadTestAction implements Runnable {
 
   private static final FluentLogger logger = FluentLogger.forEnclosingClass();
@@ -335,9 +336,9 @@ public class LoadTestAction implements Runnable {
           Task.newBuilder()
               .setAppEngineHttpRequest(
                   cloudTasksUtils
-                      .createPostTask(
-                          "/_dr/epptool",
-                          Service.TOOLS,
+                      .createTask(
+                          EppToolAction.class,
+                          Action.Method.POST,
                           ImmutableMultimap.of(
                               "clientId",
                               registrarId,
@@ -350,9 +351,8 @@ public class LoadTestAction implements Runnable {
                       .toBuilder()
                       .getAppEngineHttpRequest()
                       .toBuilder()
-                      // instead of adding the X_CSRF_TOKEN to params, this remains as part of
-                      // headers because of the existing setup for authentication in {@link
-                      // google.registry.request.auth.LegacyAuthenticationMechanism}
+                      // TODO: investigate if the following is necessary now that
+                      // LegacyAuthenticationMechanism is gone.
                       .putHeaders(X_CSRF_TOKEN, xsrfToken)
                       .build())
               .setScheduleTime(

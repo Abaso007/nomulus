@@ -19,8 +19,7 @@ import static com.google.common.truth.Truth.assertWithMessage;
 import com.google.common.collect.ImmutableSet;
 import google.registry.request.Action;
 import google.registry.request.JsonActionRunner;
-import google.registry.ui.server.registrar.HtmlAction;
-import google.registry.ui.server.registrar.JsonGetAction;
+import google.registry.ui.server.console.ConsoleApiAction;
 import io.github.classgraph.ClassGraph;
 import io.github.classgraph.ScanResult;
 import org.junit.jupiter.api.Test;
@@ -31,9 +30,8 @@ final class ActionMembershipTest {
   @Test
   void testAllActionsEitherHtmlOrJson() {
     // All UI actions should serve valid HTML or JSON. There are three valid options:
-    // 1. Extending HtmlAction to signal that we are serving an HTML page
-    // 2. Extending JsonAction to show that we are serving JSON POST requests
-    // 3. Extending JsonGetAction to serve JSON GET requests
+    // 1. Extending JsonAction to show that we are serving JSON POST requests
+    // 2. Extending ConsoleApiAction to serve JSON requests
     ImmutableSet.Builder<String> failingClasses = new ImmutableSet.Builder<>();
     try (ScanResult scanResult =
         new ClassGraph().enableAnnotationInfo().whitelistPackages("google.registry.ui").scan()) {
@@ -41,9 +39,9 @@ final class ActionMembershipTest {
           .getClassesWithAnnotation(Action.class.getName())
           .forEach(
               classInfo -> {
-                if (!classInfo.extendsSuperclass(HtmlAction.class.getName())
-                    && !classInfo.implementsInterface(JsonActionRunner.JsonAction.class.getName())
-                    && !classInfo.implementsInterface(JsonGetAction.class.getName())) {
+                if (!classInfo.extendsSuperclass(ConsoleApiAction.class.getName())
+                    && !classInfo.implementsInterface(
+                        JsonActionRunner.JsonAction.class.getName())) {
                   failingClasses.add(classInfo.getName());
                 }
               });

@@ -46,6 +46,7 @@ import google.registry.model.EppResource;
 import google.registry.model.EppResource.ResourceWithTransferData;
 import google.registry.model.billing.BillingRecurrence;
 import google.registry.model.contact.Contact;
+import google.registry.model.domain.DesignatedContact.Type;
 import google.registry.model.domain.launch.LaunchNotice;
 import google.registry.model.domain.rgp.GracePeriodStatus;
 import google.registry.model.domain.secdns.DomainDsData;
@@ -65,25 +66,25 @@ import google.registry.tmch.LordnTaskUtils.LordnPhase;
 import google.registry.tmch.NordnUploadAction;
 import google.registry.util.CollectionUtils;
 import google.registry.util.DateTimeUtils;
+import jakarta.persistence.Access;
+import jakarta.persistence.AccessType;
+import jakarta.persistence.AttributeOverride;
+import jakarta.persistence.AttributeOverrides;
+import jakarta.persistence.Column;
+import jakarta.persistence.Embeddable;
+import jakarta.persistence.Embedded;
+import jakarta.persistence.EnumType;
+import jakarta.persistence.Enumerated;
+import jakarta.persistence.Id;
+import jakarta.persistence.MappedSuperclass;
+import jakarta.persistence.Transient;
 import java.util.HashSet;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.function.Predicate;
 import javax.annotation.Nullable;
-import javax.persistence.Access;
-import javax.persistence.AccessType;
-import javax.persistence.AttributeOverride;
-import javax.persistence.AttributeOverrides;
-import javax.persistence.Column;
-import javax.persistence.Embeddable;
-import javax.persistence.Embedded;
-import javax.persistence.EnumType;
-import javax.persistence.Enumerated;
-import javax.persistence.Id;
-import javax.persistence.MappedSuperclass;
-import javax.persistence.Transient;
-import org.hibernate.collection.internal.PersistentSet;
+import org.hibernate.collection.spi.PersistentSet;
 import org.joda.time.DateTime;
 import org.joda.time.Interval;
 
@@ -120,7 +121,7 @@ public class DomainBase extends EppResource
    * from (creationTime, deletionTime) there can only be one domain in the database with this name.
    * However, there can be many domains with the same name and non-overlapping lifetimes.
    *
-   * @invariant domainName == domainName.toLowerCase(Locale.ENGLISH)
+   * <p>Invariant: domainName == domainName.toLowerCase(Locale.ENGLISH)
    */
   @Expose String domainName;
 
@@ -131,11 +132,11 @@ public class DomainBase extends EppResource
   @Expose @Transient Set<VKey<Host>> nsHosts;
 
   /** Contacts. */
-  @Expose VKey<Contact> adminContact;
+  @Expose @Nullable VKey<Contact> adminContact;
 
-  @Expose VKey<Contact> billingContact;
-  @Expose VKey<Contact> techContact;
-  @Expose VKey<Contact> registrantContact;
+  @Expose @Nullable VKey<Contact> billingContact;
+  @Expose @Nullable VKey<Contact> techContact;
+  @Expose @Nullable VKey<Contact> registrantContact;
 
   /** Authorization info (aka transfer secret) of the domain. */
   @Embedded
@@ -143,6 +144,7 @@ public class DomainBase extends EppResource
     @AttributeOverride(name = "pw.value", column = @Column(name = "auth_info_value")),
     @AttributeOverride(name = "pw.repoId", column = @Column(name = "auth_info_repo_id")),
   })
+  @Nullable
   DomainAuthInfo authInfo;
 
   /** Data used to construct DS records for this domain. */
@@ -539,7 +541,7 @@ public class DomainBase extends EppResource
     for (GracePeriod gracePeriod : almostBuilt.getGracePeriods()) {
       if (isBeforeOrAt(gracePeriod.getExpirationTime(), now)) {
         builder.removeGracePeriod(gracePeriod);
-        if (!newLastEppUpdateTime.isPresent()
+        if (newLastEppUpdateTime.isEmpty()
             || isBeforeOrAt(newLastEppUpdateTime.get(), gracePeriod.getExpirationTime())) {
           newLastEppUpdateTime = Optional.of(gracePeriod.getExpirationTime());
         }
@@ -577,7 +579,7 @@ public class DomainBase extends EppResource
 
   /** Loads and returns the fully qualified host names of all linked nameservers. */
   public ImmutableSortedSet<String> loadNameserverHostNames() {
-    return tm().transact(
+    return tm().reTransact(
             () ->
                 tm().loadByKeys(getNameservers()).values().stream()
                     .map(Host::getHostName)
@@ -585,32 +587,50 @@ public class DomainBase extends EppResource
   }
 
   /** A key to the registrant who registered this domain. */
-  public VKey<Contact> getRegistrant() {
-    return registrantContact;
+  public Optional<VKey<Contact>> getRegistrant() {
+    return Optional.ofNullable(registrantContact);
   }
 
-  public VKey<Contact> getAdminContact() {
-    return adminContact;
+  public Optional<VKey<Contact>> getAdminContact() {
+    return Optional.ofNullable(adminContact);
   }
 
-  public VKey<Contact> getBillingContact() {
-    return billingContact;
+  public Optional<VKey<Contact>> getBillingContact() {
+    return Optional.ofNullable(billingContact);
   }
 
-  public VKey<Contact> getTechContact() {
-    return techContact;
+  public Optional<VKey<Contact>> getTechContact() {
+    return Optional.ofNullable(techContact);
   }
 
-  /** Associated contacts for the domain (other than registrant). */
+  /**
+   * Associated contacts for the domain (other than registrant).
+   *
+   * <p>Note: This can be an empty set if no contacts are present for the domain.
+   */
   public ImmutableSet<DesignatedContact> getContacts() {
     return getAllContacts(false);
   }
 
+  /**
+   * Gets all associated contacts for the domain, including the registrant.
+   *
+   * <p>Note: This can be an empty set if no contacts are present for the domain.
+   */
+  public ImmutableSet<DesignatedContact> getAllContacts() {
+    return getAllContacts(true);
+  }
+
+  @Nullable
   public DomainAuthInfo getAuthInfo() {
     return authInfo;
   }
 
-  /** Returns all referenced contacts from this domain. */
+  /**
+   * Returns all referenced contacts from this domain.
+   *
+   * <p>Note: This can be an empty set if no contacts are present for the domain.
+   */
   public ImmutableSet<VKey<Contact>> getReferencedContacts() {
     return nullToEmptyImmutableCopy(getAllContacts(true)).stream()
         .map(DesignatedContact::getContactKey)
@@ -620,18 +640,12 @@ public class DomainBase extends EppResource
 
   private ImmutableSet<DesignatedContact> getAllContacts(boolean includeRegistrant) {
     ImmutableSet.Builder<DesignatedContact> builder = new ImmutableSet.Builder<>();
-    if (includeRegistrant && registrantContact != null) {
-      builder.add(DesignatedContact.create(DesignatedContact.Type.REGISTRANT, registrantContact));
+    if (includeRegistrant) {
+      getRegistrant().ifPresent(c -> builder.add(DesignatedContact.create(Type.REGISTRANT, c)));
     }
-    if (adminContact != null) {
-      builder.add(DesignatedContact.create(DesignatedContact.Type.ADMIN, adminContact));
-    }
-    if (billingContact != null) {
-      builder.add(DesignatedContact.create(DesignatedContact.Type.BILLING, billingContact));
-    }
-    if (techContact != null) {
-      builder.add(DesignatedContact.create(DesignatedContact.Type.TECH, techContact));
-    }
+    getAdminContact().ifPresent(c -> builder.add(DesignatedContact.create(Type.ADMIN, c)));
+    getBillingContact().ifPresent(c -> builder.add(DesignatedContact.create(Type.BILLING, c)));
+    getTechContact().ifPresent(c -> builder.add(DesignatedContact.create(Type.TECH, c)));
     return builder.build();
   }
 
@@ -647,11 +661,13 @@ public class DomainBase extends EppResource
    */
   void setContactFields(Set<DesignatedContact> contacts, boolean includeRegistrant) {
     // Set the individual contact fields.
-    billingContact = techContact = adminContact = null;
+    billingContact = null;
+    techContact = null;
+    adminContact = null;
     if (includeRegistrant) {
       registrantContact = null;
     }
-    HashSet<DesignatedContact.Type> contactsDiscovered = new HashSet<>();
+    HashSet<Type> contactsDiscovered = new HashSet<>();
     for (DesignatedContact contact : contacts) {
       checkArgument(
           !contactsDiscovered.contains(contact.getType()),
@@ -659,22 +675,17 @@ public class DomainBase extends EppResource
           contact.getType());
       contactsDiscovered.add(contact.getType());
       switch (contact.getType()) {
-        case BILLING:
-          billingContact = contact.getContactKey();
-          break;
-        case TECH:
-          techContact = contact.getContactKey();
-          break;
-        case ADMIN:
-          adminContact = contact.getContactKey();
-          break;
-        case REGISTRANT:
+        case BILLING -> billingContact = contact.getContactKey();
+        case TECH -> techContact = contact.getContactKey();
+        case ADMIN -> adminContact = contact.getContactKey();
+        case REGISTRANT -> {
           if (includeRegistrant) {
             registrantContact = contact.getContactKey();
           }
-          break;
-        default:
-          throw new IllegalArgumentException("Unknown contact resource type: " + contact.getType());
+        }
+        default ->
+            throw new IllegalArgumentException(
+                "Unknown contact resource type: " + contact.getType());
       }
     }
   }
@@ -687,7 +698,7 @@ public class DomainBase extends EppResource
 
   /** Predicate to determine if a given {@link DesignatedContact} is the registrant. */
   static final Predicate<DesignatedContact> IS_REGISTRANT =
-      (DesignatedContact contact) -> DesignatedContact.Type.REGISTRANT.equals(contact.type);
+      (DesignatedContact contact) -> Type.REGISTRANT.equals(contact.type);
 
   /** An override of {@link EppResource#asBuilder} with tighter typing. */
   @Override
@@ -722,7 +733,6 @@ public class DomainBase extends EppResource
       instance.autorenewEndTime = firstNonNull(getInstance().autorenewEndTime, END_OF_TIME);
 
       checkArgumentNotNull(emptyToNull(instance.domainName), "Missing domainName");
-      checkArgumentNotNull(instance.getRegistrant(), "Missing registrant");
       instance.tld = getTldFromDomainName(instance.domainName);
 
       T newDomain = super.build();
@@ -754,9 +764,9 @@ public class DomainBase extends EppResource
       return thisCastToDerived();
     }
 
-    public B setRegistrant(VKey<Contact> registrant) {
+    public B setRegistrant(Optional<VKey<Contact>> registrant) {
       // Set the registrant field specifically.
-      getInstance().registrantContact = registrant;
+      getInstance().registrantContact = registrant.orElse(null);
       return thisCastToDerived();
     }
 

@@ -15,21 +15,24 @@
 package google.registry.ui.server.console;
 
 import static com.google.common.truth.Truth.assertThat;
+import static google.registry.model.ImmutableObjectSubject.assertAboutImmutableObjects;
 import static google.registry.testing.DatabaseHelper.loadAllOf;
 import static google.registry.testing.DatabaseHelper.loadRegistrar;
+import static google.registry.testing.DatabaseHelper.loadSingleton;
 import static google.registry.testing.DatabaseHelper.persistNewRegistrar;
 import static google.registry.testing.DatabaseHelper.persistResource;
 import static google.registry.testing.SqlHelper.saveRegistrar;
+import static jakarta.servlet.http.HttpServletResponse.SC_BAD_REQUEST;
+import static jakarta.servlet.http.HttpServletResponse.SC_OK;
 import static org.mockito.Mockito.doReturn;
-import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
-import com.google.api.client.http.HttpStatusCodes;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
 import com.google.gson.Gson;
 import google.registry.model.console.GlobalRole;
 import google.registry.model.console.RegistrarRole;
+import google.registry.model.console.RegistrarUpdateHistory;
 import google.registry.model.console.User;
 import google.registry.model.console.UserRoles;
 import google.registry.model.registrar.Registrar;
@@ -38,11 +41,9 @@ import google.registry.persistence.transaction.JpaTestExtensions;
 import google.registry.request.Action;
 import google.registry.request.RequestModule;
 import google.registry.request.auth.AuthResult;
-import google.registry.request.auth.AuthSettings.AuthLevel;
-import google.registry.request.auth.UserAuthInfo;
+import google.registry.testing.ConsoleApiParamsUtils;
 import google.registry.testing.DeterministicStringGenerator;
 import google.registry.testing.FakeResponse;
-import google.registry.ui.server.registrar.RegistrarConsoleModule;
 import google.registry.util.StringGenerator;
 import java.io.BufferedReader;
 import java.io.IOException;
@@ -50,16 +51,14 @@ import java.io.StringReader;
 import java.util.Map;
 import java.util.Optional;
 import java.util.stream.Collectors;
-import javax.servlet.http.HttpServletRequest;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.RegisterExtension;
 
 /** Tests for {@link google.registry.ui.server.console.RegistrarsAction}. */
 class RegistrarsActionTest {
 
-  private final HttpServletRequest request = mock(HttpServletRequest.class);
   private static final Gson GSON = RequestModule.provideGson();
-  private FakeResponse response;
+  private ConsoleApiParams consoleApiParams;
 
   private StringGenerator passwordGenerator =
       new DeterministicStringGenerator("abcdefghijklmnopqrstuvwxyz");
@@ -101,26 +100,31 @@ class RegistrarsActionTest {
       new JpaTestExtensions.Builder().buildIntegrationTestExtension();
 
   @Test
-  void testSuccess_onlyRealRegistrars() {
+  void testSuccess_onlyRealAndOteRegistrars() {
     Registrar registrar = persistNewRegistrar("registrarId");
     registrar = registrar.asBuilder().setType(Registrar.Type.TEST).setIanaIdentifier(null).build();
     persistResource(registrar);
+
+    registrar = persistNewRegistrar("registrarId2");
+    registrar = registrar.asBuilder().setType(Registrar.Type.OTE).setIanaIdentifier(null).build();
+    persistResource(registrar);
+
     RegistrarsAction action =
         createAction(
             Action.Method.GET,
-            AuthResult.create(
-                AuthLevel.USER,
-                UserAuthInfo.create(
-                    createUser(
-                        new UserRoles.Builder().setGlobalRole(GlobalRole.SUPPORT_LEAD).build()))));
+            AuthResult.createUser(
+                createUser(
+                    new UserRoles.Builder().setGlobalRole(GlobalRole.SUPPORT_LEAD).build())));
     action.run();
-    assertThat(response.getStatus()).isEqualTo(HttpStatusCodes.STATUS_CODE_OK);
-    String payload = response.getPayload();
-    assertThat(
-            ImmutableList.of("\"registrarId\":\"NewRegistrar\"", "\"registrarId\":\"TheRegistrar\"")
-                .stream()
-                .allMatch(s -> payload.contains(s)))
-        .isTrue();
+    assertThat(((FakeResponse) consoleApiParams.response()).getStatus()).isEqualTo(SC_OK);
+    String payload = ((FakeResponse) consoleApiParams.response()).getPayload();
+
+    var actualRegistrarIds =
+        ImmutableList.copyOf(GSON.fromJson(payload, Registrar[].class)).stream()
+            .map(r -> r.getRegistrarId())
+            .collect(Collectors.toList());
+
+    assertThat(actualRegistrarIds).containsExactly("NewRegistrar", "TheRegistrar", "registrarId2");
   }
 
   @Test
@@ -129,13 +133,11 @@ class RegistrarsActionTest {
     RegistrarsAction action =
         createAction(
             Action.Method.GET,
-            AuthResult.create(
-                AuthLevel.USER,
-                UserAuthInfo.create(
-                    createUser(new UserRoles.Builder().setGlobalRole(GlobalRole.FTE).build()))));
+            AuthResult.createUser(
+                createUser(new UserRoles.Builder().setGlobalRole(GlobalRole.FTE).build())));
     action.run();
-    assertThat(response.getStatus()).isEqualTo(HttpStatusCodes.STATUS_CODE_OK);
-    String payload = response.getPayload();
+    assertThat(((FakeResponse) consoleApiParams.response()).getStatus()).isEqualTo(SC_OK);
+    String payload = ((FakeResponse) consoleApiParams.response()).getPayload();
     assertThat(
             ImmutableList.of(
                     "\"registrarId\":\"NewRegistrar\"",
@@ -147,15 +149,35 @@ class RegistrarsActionTest {
   }
 
   @Test
+  void testSuccess_getOnlyAllowedRegistrars() {
+    saveRegistrar("registrarId");
+
+    RegistrarsAction action =
+        createAction(
+            Action.Method.GET,
+            AuthResult.createUser(
+                createUser(
+                    new UserRoles.Builder()
+                        .setRegistrarRoles(
+                            ImmutableMap.of("registrarId", RegistrarRole.ACCOUNT_MANAGER))
+                        .build())));
+
+    action.run();
+    assertThat(((FakeResponse) consoleApiParams.response()).getStatus()).isEqualTo(SC_OK);
+    String payload = ((FakeResponse) consoleApiParams.response()).getPayload();
+    Registrar[] registrars = GSON.fromJson(payload, Registrar[].class);
+    assertThat(registrars).hasLength(1);
+    assertThat(registrars[0].getRegistrarId()).isEqualTo("registrarId");
+  }
+
+  @Test
   void testSuccess_createRegistrar() {
     RegistrarsAction action =
         createAction(
             Action.Method.POST,
-            AuthResult.create(
-                AuthLevel.USER,
-                UserAuthInfo.create(createUser(new UserRoles.Builder().setIsAdmin(true).build()))));
+            AuthResult.createUser(createUser(new UserRoles.Builder().setIsAdmin(true).build())));
     action.run();
-    assertThat(response.getStatus()).isEqualTo(HttpStatusCodes.STATUS_CODE_OK);
+    assertThat(((FakeResponse) consoleApiParams.response()).getStatus()).isEqualTo(SC_OK);
     Registrar r = loadRegistrar("regIdTest");
     assertThat(r).isNotNull();
     assertThat(
@@ -164,6 +186,9 @@ class RegistrarsActionTest {
                 .findAny()
                 .isPresent())
         .isTrue();
+    assertAboutImmutableObjects()
+        .that(r)
+        .isEqualExceptFields(loadSingleton(RegistrarUpdateHistory.class).get().getRegistrar());
   }
 
   @Test
@@ -180,17 +205,15 @@ class RegistrarsActionTest {
               RegistrarsAction action =
                   createAction(
                       Action.Method.POST,
-                      AuthResult.create(
-                          AuthLevel.USER,
-                          UserAuthInfo.create(
-                              createUser(new UserRoles.Builder().setIsAdmin(true).build()))));
+                      AuthResult.createUser(
+                          createUser(new UserRoles.Builder().setIsAdmin(true).build())));
               action.run();
-              assertThat(response.getStatus()).isEqualTo(HttpStatusCodes.STATUS_CODE_BAD_REQUEST);
-              assertThat(response.getPayload())
+              assertThat(((FakeResponse) consoleApiParams.response()).getStatus())
+                  .isEqualTo(SC_BAD_REQUEST);
+              assertThat(((FakeResponse) consoleApiParams.response()).getPayload())
                   .isEqualTo(
-                      GSON.toJson(
-                          String.format(
-                              "Missing value for %s", userFriendlyKeysToRegistrarKeys.get(key))));
+                      String.format(
+                          "Missing value for %s", userFriendlyKeysToRegistrarKeys.get(key)));
             });
   }
 
@@ -200,81 +223,41 @@ class RegistrarsActionTest {
     RegistrarsAction action =
         createAction(
             Action.Method.POST,
-            AuthResult.create(
-                AuthLevel.USER,
-                UserAuthInfo.create(createUser(new UserRoles.Builder().setIsAdmin(true).build()))));
+            AuthResult.createUser(createUser(new UserRoles.Builder().setIsAdmin(true).build())));
     action.run();
-    assertThat(response.getStatus()).isEqualTo(HttpStatusCodes.STATUS_CODE_BAD_REQUEST);
-    assertThat(response.getPayload())
-        .isEqualTo(GSON.toJson("Registrar with registrarId regIdTest already exists"));
-  }
-
-  @Test
-  void testFailure_getRegistrarIds() {
-    saveRegistrar("registrarId");
-    RegistrarsAction action =
-        createAction(
-            Action.Method.GET,
-            AuthResult.create(
-                AuthLevel.USER,
-                UserAuthInfo.create(
-                    createUser(
-                        new UserRoles.Builder()
-                            .setRegistrarRoles(
-                                ImmutableMap.of(
-                                    "registrarId",
-                                    RegistrarRole.ACCOUNT_MANAGER_WITH_REGISTRY_LOCK))
-                            .build()))));
-    action.run();
-    assertThat(response.getStatus()).isEqualTo(HttpStatusCodes.STATUS_CODE_FORBIDDEN);
+    assertThat(((FakeResponse) consoleApiParams.response()).getStatus()).isEqualTo(SC_BAD_REQUEST);
+    assertThat(((FakeResponse) consoleApiParams.response()).getPayload())
+        .isEqualTo("Registrar with registrarId regIdTest already exists");
   }
 
   private User createUser(UserRoles userRoles) {
-    return new User.Builder()
-        .setEmailAddress("email@email.com")
-        .setGaiaId("gaiaId")
-        .setUserRoles(userRoles)
-        .build();
+    return persistResource(
+        new User.Builder().setEmailAddress("email@email.com").setUserRoles(userRoles).build());
   }
 
   private RegistrarsAction createAction(Action.Method method, AuthResult authResult) {
-    response = new FakeResponse();
-    when(request.getMethod()).thenReturn(method.toString());
+    consoleApiParams = ConsoleApiParamsUtils.createFake(authResult);
+    when(consoleApiParams.request().getMethod()).thenReturn(method.toString());
     if (method.equals(Action.Method.GET)) {
       return new RegistrarsAction(
-          request,
-          authResult,
-          response,
-          GSON,
-          Optional.ofNullable(null),
-          passwordGenerator,
-          passcodeGenerator);
+          consoleApiParams, Optional.ofNullable(null), passwordGenerator, passcodeGenerator);
     } else {
       try {
         doReturn(new BufferedReader(new StringReader(registrarParamMap.toString())))
-            .when(request)
+            .when(consoleApiParams.request())
             .getReader();
       } catch (IOException e) {
         return new RegistrarsAction(
-            request,
-            authResult,
-            response,
-            GSON,
+            consoleApiParams,
             Optional.ofNullable(null),
             passwordGenerator,
             passcodeGenerator);
       }
       Optional<Registrar> maybeRegistrar =
-          RegistrarConsoleModule.provideRegistrar(
-              GSON, RequestModule.provideJsonBody(request, GSON));
+          ConsoleModule.provideRegistrar(
+              GSON, RequestModule.provideJsonBody(consoleApiParams.request(), GSON));
       return new RegistrarsAction(
-          request,
-          authResult,
-          response,
-          GSON,
-          maybeRegistrar,
-          passwordGenerator,
-          passcodeGenerator);
+          consoleApiParams, maybeRegistrar, passwordGenerator, passcodeGenerator);
     }
   }
 }

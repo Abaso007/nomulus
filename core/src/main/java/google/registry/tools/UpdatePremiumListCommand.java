@@ -18,6 +18,7 @@ import static com.google.common.base.Preconditions.checkArgument;
 import static google.registry.util.ListNamingUtils.convertFilePathToName;
 import static java.nio.charset.StandardCharsets.UTF_8;
 
+import com.beust.jcommander.Parameter;
 import com.beust.jcommander.Parameters;
 import com.google.common.base.Strings;
 import google.registry.model.tld.label.PremiumList;
@@ -29,8 +30,27 @@ import java.nio.file.Files;
 @Parameters(separators = " =", commandDescription = "Update a PremiumList in Database.")
 class UpdatePremiumListCommand extends CreateOrUpdatePremiumListCommand {
 
+  @Parameter(
+      names = {"-d", "--dry_run"},
+      description = "Does not execute the entity mutation")
+  boolean dryRun;
+
+  @Parameter(
+      names = {"--build_environment"},
+      description =
+          "DO NOT USE THIS FLAG ON THE COMMAND LINE! This flag indicates the command is being run"
+              + " by the build environment tools. This flag should never be used by a human user"
+              + " from the command line.")
+  boolean buildEnv;
+
+  // Indicates if there is a new change made by this command
+  private boolean newChange = false;
+
   @Override
   protected String prompt() throws Exception {
+    checkArgument(
+        !RegistryToolEnvironment.get().equals(RegistryToolEnvironment.PRODUCTION) || buildEnv,
+        "The --build_environment flag must be used when running update_premium_list in production");
     name = Strings.isNullOrEmpty(name) ? convertFilePathToName(inputFile) : name;
     PremiumList existingList =
         PremiumListDao.getLatestRevision(name)
@@ -43,8 +63,23 @@ class UpdatePremiumListCommand extends CreateOrUpdatePremiumListCommand {
     checkArgument(!inputData.isEmpty(), "New premium list data cannot be empty");
     currency = existingList.getCurrency();
     PremiumList updatedPremiumList = PremiumListUtils.parseToPremiumList(name, currency, inputData);
-    return String.format(
-        "Update premium list for %s?\n Old List: %s\n New List: %s",
-        name, existingList, updatedPremiumList);
+    if (!existingList
+        .getLabelsToPrices()
+        .entrySet()
+        .equals(updatedPremiumList.getLabelsToPrices().entrySet())) {
+      newChange = true;
+      return String.format(
+          "Update premium list for %s?\n Old List: %s\n New List: %s",
+          name, existingList, updatedPremiumList);
+    } else {
+      return String.format(
+          "This update contains no changes to the premium list for %s.\n List Contents: %s",
+          name, existingList);
+    }
+  }
+
+  @Override
+  protected boolean dontRunCommand() {
+    return dryRun || !newChange;
   }
 }

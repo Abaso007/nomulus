@@ -40,6 +40,8 @@ import google.registry.model.domain.fee.FeeQueryCommandExtensionItem.CommandName
 import google.registry.model.domain.token.AllocationToken;
 import google.registry.model.domain.token.AllocationToken.RegistrationBehavior;
 import google.registry.model.domain.token.AllocationToken.TokenStatus;
+import org.joda.money.CurrencyUnit;
+import org.joda.money.Money;
 import org.joda.time.DateTime;
 import org.junit.jupiter.api.Test;
 
@@ -140,6 +142,16 @@ class UpdateAllocationTokensCommandTest extends CommandTestCase<UpdateAllocation
   }
 
   @Test
+  void testUpdateDiscountPrice() throws Exception {
+    AllocationToken token =
+        persistResource(
+            builderWithPromo().setDiscountPrice(Money.of(CurrencyUnit.USD, 10)).build());
+    runCommandForced("--prefix", "token", "--discount_price", "USD 2.15");
+    assertThat(reloadResource(token).getDiscountPrice().get())
+        .isEqualTo(Money.of(CurrencyUnit.USD, 2.15));
+  }
+
+  @Test
   void testUpdateDiscountPremiums() throws Exception {
     AllocationToken token =
         persistResource(
@@ -159,16 +171,22 @@ class UpdateAllocationTokensCommandTest extends CommandTestCase<UpdateAllocation
 
   @Test
   void testUpdateRenewalPriceBehavior_setToSpecified() throws Exception {
-    AllocationToken token = persistResource(builderWithPromo().setDiscountFraction(0.5).build());
-    runCommandForced("--prefix", "token", "--renewal_price_behavior", "SPECIFIED");
-    assertThat(reloadResource(token).getRenewalPriceBehavior()).isEqualTo(SPECIFIED);
+    AllocationToken token = persistResource(builderWithPromo().build());
+    runCommandForced(
+        "--prefix", "token", "--renewal_price_behavior", "SPECIFIED", "--renewal_price", "USD 1");
+    token = reloadResource(token);
+    assertThat(token.getRenewalPriceBehavior()).isEqualTo(SPECIFIED);
+    assertThat(token.getRenewalPrice()).hasValue(Money.of(CurrencyUnit.USD, 1));
   }
 
   @Test
   void testUpdateRenewalPriceBehavior_setToDefault() throws Exception {
     AllocationToken token =
         persistResource(
-            builderWithPromo().setRenewalPriceBehavior(SPECIFIED).setDiscountFraction(0.5).build());
+            builderWithPromo()
+                .setRenewalPriceBehavior(SPECIFIED)
+                .setRenewalPrice(Money.of(CurrencyUnit.USD, 1))
+                .build());
     runCommandForced("--prefix", "token", "--renewal_price_behavior", "default");
     assertThat(reloadResource(token).getRenewalPriceBehavior()).isEqualTo(DEFAULT);
   }
@@ -177,7 +195,10 @@ class UpdateAllocationTokensCommandTest extends CommandTestCase<UpdateAllocation
   void testUpdateRenewalPriceBehavior_setToNonPremium() throws Exception {
     AllocationToken token =
         persistResource(
-            builderWithPromo().setRenewalPriceBehavior(SPECIFIED).setDiscountFraction(0.5).build());
+            builderWithPromo()
+                .setRenewalPriceBehavior(SPECIFIED)
+                .setRenewalPrice(Money.of(CurrencyUnit.USD, 1))
+                .build());
     runCommandForced("--prefix", "token", "--renewal_price_behavior", "NONpremium");
     assertThat(reloadResource(token).getRenewalPriceBehavior()).isEqualTo(NONPREMIUM);
   }
@@ -193,9 +214,24 @@ class UpdateAllocationTokensCommandTest extends CommandTestCase<UpdateAllocation
   void testUpdateRenewalPriceBehavior_setFromSpecifiedToSpecified() throws Exception {
     AllocationToken token =
         persistResource(
-            builderWithPromo().setRenewalPriceBehavior(SPECIFIED).setDiscountFraction(0.5).build());
+            builderWithPromo()
+                .setRenewalPriceBehavior(SPECIFIED)
+                .setRenewalPrice(Money.of(CurrencyUnit.USD, 1))
+                .build());
     runCommandForced("--prefix", "token", "--renewal_price_behavior", "SPecified");
     assertThat(reloadResource(token).getRenewalPriceBehavior()).isEqualTo(SPECIFIED);
+  }
+
+  @Test
+  void testFailure_nonSpecifiedToSpecified_withoutPrice() throws Exception {
+    persistResource(builderWithPromo().build());
+    assertThat(
+            assertThrows(
+                IllegalArgumentException.class,
+                () ->
+                    runCommandForced("--prefix", "token", "--renewal_price_behavior", "SPECIFIED")))
+        .hasMessageThat()
+        .isEqualTo("renewalPrice must be specified iff renewalPriceBehavior is SPECIFIED");
   }
 
   @Test
@@ -214,7 +250,10 @@ class UpdateAllocationTokensCommandTest extends CommandTestCase<UpdateAllocation
   void testUpdateRenewalPriceBehavior_setToMixedCaseDefault() throws Exception {
     AllocationToken token =
         persistResource(
-            builderWithPromo().setRenewalPriceBehavior(SPECIFIED).setDiscountFraction(0.5).build());
+            builderWithPromo()
+                .setRenewalPriceBehavior(SPECIFIED)
+                .setRenewalPrice(Money.of(CurrencyUnit.USD, 1))
+                .build());
     runCommandForced("--prefix", "token", "--renewal_price_behavior", "deFauLt");
     assertThat(reloadResource(token).getRenewalPriceBehavior()).isEqualTo(DEFAULT);
   }
@@ -317,7 +356,7 @@ class UpdateAllocationTokensCommandTest extends CommandTestCase<UpdateAllocation
         "token",
         "--token_status_transitions",
         String.format(
-            "\"%s=NOT_STARTED,%s=VALID,%s=CANCELLED\"", START_OF_TIME, now.minusDays(1), now));
+            "%s=NOT_STARTED,%s=VALID,%s=CANCELLED", START_OF_TIME, now.minusDays(1), now));
     token = reloadResource(token);
     assertThat(token.getTokenStatusTransitions().toValueMap())
         .containsExactly(START_OF_TIME, NOT_STARTED, now.minusDays(1), VALID, now, CANCELLED);
@@ -336,8 +375,7 @@ class UpdateAllocationTokensCommandTest extends CommandTestCase<UpdateAllocation
                     "token",
                     "--token_status_transitions",
                     String.format(
-                        "\"%s=NOT_STARTED,%s=ENDED,%s=VALID\"",
-                        START_OF_TIME, now.minusDays(1), now)));
+                        "%s=NOT_STARTED,%s=ENDED,%s=VALID", START_OF_TIME, now.minusDays(1), now)));
     assertThat(thrown)
         .hasMessageThat()
         .isEqualTo("tokenStatusTransitions map cannot transition from NOT_STARTED to ENDED.");
@@ -351,7 +389,9 @@ class UpdateAllocationTokensCommandTest extends CommandTestCase<UpdateAllocation
             new AllocationToken.Builder()
                 .setToken("token")
                 .setTokenType(BULK_PRICING)
+                .setDiscountFraction(1.0)
                 .setRenewalPriceBehavior(SPECIFIED)
+                .setRenewalPrice(Money.of(CurrencyUnit.USD, 0))
                 .setAllowedEppActions(ImmutableSet.of(CommandName.CREATE))
                 .setAllowedRegistrarIds(ImmutableSet.of("TheRegistrar"))
                 .setTokenStatusTransitions(
@@ -364,8 +404,7 @@ class UpdateAllocationTokensCommandTest extends CommandTestCase<UpdateAllocation
         "--prefix",
         "token",
         "--token_status_transitions",
-        String.format(
-            "\"%s=NOT_STARTED,%s=VALID,%s=ENDED\"", START_OF_TIME, now.minusDays(1), now));
+        String.format("%s=NOT_STARTED,%s=VALID,%s=ENDED", START_OF_TIME, now.minusDays(1), now));
     token = reloadResource(token);
     assertThat(token.getTokenStatusTransitions().toValueMap())
         .containsExactly(START_OF_TIME, NOT_STARTED, now.minusDays(1), VALID, now, ENDED);
@@ -379,7 +418,9 @@ class UpdateAllocationTokensCommandTest extends CommandTestCase<UpdateAllocation
             new AllocationToken.Builder()
                 .setToken("token")
                 .setTokenType(BULK_PRICING)
+                .setDiscountFraction(1.0)
                 .setRenewalPriceBehavior(SPECIFIED)
+                .setRenewalPrice(Money.of(CurrencyUnit.USD, 0))
                 .setAllowedEppActions(ImmutableSet.of(CommandName.CREATE))
                 .setAllowedRegistrarIds(ImmutableSet.of("TheRegistrar"))
                 .setTokenStatusTransitions(
@@ -403,8 +444,7 @@ class UpdateAllocationTokensCommandTest extends CommandTestCase<UpdateAllocation
                     "token",
                     "--token_status_transitions",
                     String.format(
-                        "\"%s=NOT_STARTED,%s=VALID,%s=ENDED\"",
-                        START_OF_TIME, now.minusDays(1), now)));
+                        "%s=NOT_STARTED,%s=VALID,%s=ENDED", START_OF_TIME, now.minusDays(1), now)));
     assertThat(thrown)
         .hasMessageThat()
         .isEqualTo(

@@ -16,7 +16,6 @@ package google.registry.flows.domain;
 
 import static com.google.common.collect.MoreCollectors.onlyElement;
 import static com.google.common.truth.Truth.assertThat;
-import static com.google.common.truth.Truth8.assertThat;
 import static google.registry.batch.AsyncTaskEnqueuer.PARAM_REQUESTED_TIME;
 import static google.registry.batch.AsyncTaskEnqueuer.PARAM_RESAVE_TIMES;
 import static google.registry.batch.AsyncTaskEnqueuer.PARAM_RESOURCE_KEY;
@@ -103,7 +102,10 @@ import google.registry.model.transfer.TransferResponse;
 import google.registry.model.transfer.TransferStatus;
 import google.registry.testing.CloudTasksHelper.TaskMatcher;
 import google.registry.testing.DatabaseHelper;
+import google.registry.testing.LogsSubject;
 import java.util.Map;
+import java.util.Optional;
+import java.util.logging.Level;
 import org.joda.money.Money;
 import org.joda.time.DateTime;
 import org.joda.time.Duration;
@@ -163,7 +165,7 @@ class DomainDeleteFlowTest extends ResourceFlowTestCase<DomainDeleteFlow, Domain
             DatabaseHelper.newDomain(getUniqueIdFromCommand())
                 .asBuilder()
                 .setCreationTimeForTest(TIME_BEFORE_FLOW)
-                .setRegistrant(contact.createVKey())
+                .setRegistrant(Optional.of(contact.createVKey()))
                 .setRegistrationExpirationTime(expirationTime)
                 .build());
     earlierHistoryEntry =
@@ -739,7 +741,8 @@ class DomainDeleteFlowTest extends ResourceFlowTestCase<DomainDeleteFlow, Domain
         DatabaseHelper.newDomain("example1.tld")
             .asBuilder()
             .setRegistrant(
-                loadByForeignKey(Contact.class, "sh8013", clock.nowUtc()).get().createVKey())
+                Optional.of(
+                    loadByForeignKey(Contact.class, "sh8013", clock.nowUtc()).get().createVKey()))
             .setNameservers(ImmutableSet.of(host.createVKey()))
             .setDeletionTime(START_OF_TIME)
             .build());
@@ -1245,5 +1248,29 @@ class DomainDeleteFlowTest extends ResourceFlowTestCase<DomainDeleteFlow, Domain
         GracePeriod.forBillingEvent(GracePeriodStatus.ADD, domain.getRepoId(), graceBillingEvent));
     clock.advanceOneMilli();
     runFlowAssertResponse(loadFile("domain_delete_response_fee_free_grace.xml"));
+  }
+
+  @Test
+  void testSuccess_skipsPollMessage_whenConfigured() throws Exception {
+    setUpSuccessfulTest();
+    domain =
+        persistResource(
+            domain.asBuilder().setPersistedCurrentSponsorRegistrarId("NewRegistrar").build());
+    setRegistrarIdForFlow("NewRegistrar");
+    runFlowAssertResponse(loadFile("domain_delete_response_pending.xml"));
+    assertPollMessages();
+  }
+
+  @Test
+  void testSuccess_logsSqlStatements() throws Exception {
+    setUpSuccessfulTest();
+    runFlowAssertResponse(loadFile("domain_delete_response_pending.xml"));
+    LogsSubject.assertAboutLogs()
+        .that(logHandler)
+        .hasLogAtLevelWithMessage(
+            Level.INFO,
+            "SQL_STATEMENT_LOG: insert into \"DomainHistory\" (history_by_superuser,"
+                + "history_registrar_id,history_modification_time,history_other_registrar_id,"
+                + "history_period_unit,history_period_value,history_reason,history");
   }
 }

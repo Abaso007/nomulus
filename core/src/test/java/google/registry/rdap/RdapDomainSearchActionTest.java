@@ -15,7 +15,6 @@
 package google.registry.rdap;
 
 import static com.google.common.truth.Truth.assertThat;
-import static google.registry.rdap.RdapTestHelper.assertThat;
 import static google.registry.rdap.RdapTestHelper.parseJsonObject;
 import static google.registry.request.Action.Method.POST;
 import static google.registry.testing.DatabaseHelper.createTld;
@@ -27,6 +26,7 @@ import static google.registry.testing.FullFieldsTestEntityHelper.makeDomain;
 import static google.registry.testing.FullFieldsTestEntityHelper.makeHistoryEntry;
 import static google.registry.testing.FullFieldsTestEntityHelper.makeRegistrar;
 import static google.registry.testing.FullFieldsTestEntityHelper.makeRegistrarPocs;
+import static google.registry.testing.GsonSubject.assertAboutJson;
 
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableListMultimap;
@@ -90,21 +90,19 @@ class RdapDomainSearchActionTest extends RdapSearchActionTestCase<RdapDomainSear
   private JsonObject generateActualJson(RequestType requestType, String paramValue, String cursor) {
     String requestTypeParam;
     switch (requestType) {
-      case NAME:
+      case NAME -> {
         action.nameParam = Optional.of(paramValue);
         requestTypeParam = "name";
-        break;
-      case NS_LDH_NAME:
+      }
+      case NS_LDH_NAME -> {
         action.nsLdhNameParam = Optional.of(paramValue);
         requestTypeParam = "nsLdhName";
-        break;
-      case NS_IP:
+      }
+      case NS_IP -> {
         action.nsIpParam = Optional.of(paramValue);
         requestTypeParam = "nsIp";
-        break;
-      default:
-        requestTypeParam = "";
-        break;
+      }
+      default -> requestTypeParam = "";
     }
     if (paramValue != null) {
       if (cursor == null) {
@@ -381,8 +379,8 @@ class RdapDomainSearchActionTest extends RdapSearchActionTestCase<RdapDomainSear
 
   private JsonObject generateExpectedJsonForTwoDomainsCatStarReplySql() {
     return jsonFileBuilder()
-        .addDomain("cat2.lol", "17-LOL")
         .addDomain("cat.lol", "C-LOL")
+        .addDomain("cat2.lol", "17-LOL")
         .load("rdap_domains_two.json");
   }
 
@@ -481,7 +479,9 @@ class RdapDomainSearchActionTest extends RdapSearchActionTestCase<RdapDomainSear
 
   private void runSuccessfulTest(RequestType requestType, String queryString, JsonObject expected) {
     rememberWildcardType(queryString);
-    assertThat(generateActualJson(requestType, queryString)).isEqualTo(wrapInSearchReply(expected));
+    assertAboutJson()
+        .that(generateActualJson(requestType, queryString))
+        .isEqualTo(wrapInSearchReply(expected));
     assertThat(response.getStatus()).isEqualTo(200);
   }
 
@@ -514,7 +514,8 @@ class RdapDomainSearchActionTest extends RdapSearchActionTestCase<RdapDomainSear
       String nextQuery,
       String filename) {
     rememberWildcardType(queryString);
-    assertThat(generateActualJson(requestType, queryString))
+    assertAboutJson()
+        .that(generateActualJson(requestType, queryString))
         .isEqualTo(
             jsonFileBuilder()
                 .addDomain("domain1.lol", domainRoid1)
@@ -528,7 +529,8 @@ class RdapDomainSearchActionTest extends RdapSearchActionTestCase<RdapDomainSear
 
   private void runNotFoundTest(RequestType requestType, String queryString, String errorMessage) {
     rememberWildcardType(queryString);
-    assertThat(generateActualJson(requestType, queryString))
+    assertAboutJson()
+        .that(generateActualJson(requestType, queryString))
         .isEqualTo(generateExpectedJsonError(errorMessage, 404));
     assertThat(response.getStatus()).isEqualTo(404);
   }
@@ -645,7 +647,8 @@ class RdapDomainSearchActionTest extends RdapSearchActionTestCase<RdapDomainSear
 
   @Test
   void testInvalidRequest_rejected() {
-    assertThat(generateActualJson(RequestType.NONE, null))
+    assertAboutJson()
+        .that(generateActualJson(RequestType.NONE, null))
         .isEqualTo(
             generateExpectedJsonError(
                 "You must specify either name=XXXX, nsLdhName=YYYY or nsIp=ZZZZ", 400));
@@ -655,7 +658,8 @@ class RdapDomainSearchActionTest extends RdapSearchActionTestCase<RdapDomainSear
 
   @Test
   void testInvalidWildcard_rejected() {
-    assertThat(generateActualJson(RequestType.NAME, "exam*ple"))
+    assertAboutJson()
+        .that(generateActualJson(RequestType.NAME, "exam*ple"))
         .isEqualTo(
             generateExpectedJsonError(
                 "Query can only have a single wildcard, and it must be at the end of a label, but"
@@ -667,7 +671,8 @@ class RdapDomainSearchActionTest extends RdapSearchActionTestCase<RdapDomainSear
 
   @Test
   void testMultipleWildcards_rejected() {
-    assertThat(generateActualJson(RequestType.NAME, "*.*"))
+    assertAboutJson()
+        .that(generateActualJson(RequestType.NAME, "*.*"))
         .isEqualTo(
             generateExpectedJsonError(
                 "Query can only have a single wildcard, and it must be at the end of a label, but"
@@ -680,7 +685,8 @@ class RdapDomainSearchActionTest extends RdapSearchActionTestCase<RdapDomainSear
   @Test
   void testNoCharactersToMatch_rejected() {
     rememberWildcardType("*");
-    assertThat(generateActualJson(RequestType.NAME, "*"))
+    assertAboutJson()
+        .that(generateActualJson(RequestType.NAME, "*"))
         .isEqualTo(
             generateExpectedJsonError(
                 "Initial search string is required for wildcard domain searches without a TLD"
@@ -693,7 +699,8 @@ class RdapDomainSearchActionTest extends RdapSearchActionTestCase<RdapDomainSear
   @Test
   void testFewerThanTwoCharactersToMatch_rejected() {
     rememberWildcardType("a*");
-    assertThat(generateActualJson(RequestType.NAME, "a*"))
+    assertAboutJson()
+        .that(generateActualJson(RequestType.NAME, "a*"))
         .isEqualTo(
             generateExpectedJsonError(
                 "Initial search string must be at least 2 characters for wildcard domain searches"
@@ -743,7 +750,7 @@ class RdapDomainSearchActionTest extends RdapSearchActionTestCase<RdapDomainSear
   void testDomainMatch_found_loggedInAsOtherRegistrar() {
     login("otherregistrar");
     runSuccessfulTestWithCatLol(
-        RequestType.NAME, "cat.lol", "rdap_domain_no_contacts_with_remark.json");
+        RequestType.NAME, "cat.lol", "rdap_domain_redacted_contacts_with_remark.json");
     verifyMetrics(SearchType.BY_DOMAIN_NAME, Optional.of(1L));
   }
 
@@ -775,7 +782,7 @@ class RdapDomainSearchActionTest extends RdapSearchActionTestCase<RdapDomainSear
             .addRegistrar("St. John Chrysostom")
             .addNameserver("ns1.cat.lol", "8-ROID")
             .addNameserver("ns2.external.tld", "1F-ROID")
-            .load("rdap_domain_no_contacts_with_remark.json"));
+            .load("rdap_domain_redacted_contacts_with_remark.json"));
     verifyMetrics(SearchType.BY_DOMAIN_NAME, Optional.of(1L));
   }
 
@@ -819,7 +826,7 @@ class RdapDomainSearchActionTest extends RdapSearchActionTestCase<RdapDomainSear
             .addRegistrar("1.test")
             .addNameserver("ns1.cat.1.test", "35-ROID")
             .addNameserver("ns2.cat.2.test", "37-ROID")
-            .load("rdap_domain_no_contacts_with_remark.json"));
+            .load("rdap_domain_redacted_contacts_with_remark.json"));
     verifyMetrics(SearchType.BY_DOMAIN_NAME, Optional.of(1L));
   }
 
@@ -833,7 +840,7 @@ class RdapDomainSearchActionTest extends RdapSearchActionTestCase<RdapDomainSear
             .addRegistrar("1.test")
             .addNameserver("ns1.cat.1.test", "35-ROID")
             .addNameserver("ns2.cat.2.test", "37-ROID")
-            .load("rdap_domain_no_contacts_with_remark.json"));
+            .load("rdap_domain_redacted_contacts_with_remark.json"));
     verifyMetrics(SearchType.BY_DOMAIN_NAME, Optional.of(1L));
   }
 
@@ -846,7 +853,8 @@ class RdapDomainSearchActionTest extends RdapSearchActionTestCase<RdapDomainSear
   @Test
   void testDomainMatch_catstar_lol_found_sql() {
     rememberWildcardType("cat*.lol");
-    assertThat(generateActualJson(RequestType.NAME, "cat*.lol"))
+    assertAboutJson()
+        .that(generateActualJson(RequestType.NAME, "cat*.lol"))
         .isEqualTo(generateExpectedJsonForTwoDomainsCatStarReplySql());
     assertThat(response.getStatus()).isEqualTo(200);
     verifyMetrics(SearchType.BY_DOMAIN_NAME, Optional.of(2L));
@@ -855,7 +863,8 @@ class RdapDomainSearchActionTest extends RdapSearchActionTestCase<RdapDomainSear
   @Test
   void testDomainMatch_cstar_lol_found_sql() {
     rememberWildcardType("c*.lol");
-    assertThat(generateActualJson(RequestType.NAME, "c*.lol"))
+    assertAboutJson()
+        .that(generateActualJson(RequestType.NAME, "c*.lol"))
         .isEqualTo(generateExpectedJsonForTwoDomainsCatStarReplySql());
     assertThat(response.getStatus()).isEqualTo(200);
     verifyMetrics(SearchType.BY_DOMAIN_NAME, Optional.of(2L));
@@ -870,7 +879,8 @@ class RdapDomainSearchActionTest extends RdapSearchActionTestCase<RdapDomainSear
   @Test
   void testDomainMatch_star_lol_found_sql() {
     rememberWildcardType("*.lol");
-    assertThat(generateActualJson(RequestType.NAME, "*.lol"))
+    assertAboutJson()
+        .that(generateActualJson(RequestType.NAME, "*.lol"))
         .isEqualTo(generateExpectedJsonForTwoDomainsCatStarReplySql());
     assertThat(response.getStatus()).isEqualTo(200);
     verifyMetrics(SearchType.BY_DOMAIN_NAME, Optional.of(2L));
@@ -880,7 +890,8 @@ class RdapDomainSearchActionTest extends RdapSearchActionTestCase<RdapDomainSear
   void testDomainMatch_star_lol_found_sameRegistrarRequested_sql() {
     action.registrarParam = Optional.of("evilregistrar");
     rememberWildcardType("*.lol");
-    assertThat(generateActualJson(RequestType.NAME, "*.lol"))
+    assertAboutJson()
+        .that(generateActualJson(RequestType.NAME, "*.lol"))
         .isEqualTo(generateExpectedJsonForTwoDomainsCatStarReplySql());
     assertThat(response.getStatus()).isEqualTo(200);
     verifyMetrics(SearchType.BY_DOMAIN_NAME, Optional.of(2L));
@@ -897,7 +908,8 @@ class RdapDomainSearchActionTest extends RdapSearchActionTestCase<RdapDomainSear
   @Test
   void testDomainMatch_cat_star_found_sql() {
     rememberWildcardType("cat.*");
-    assertThat(generateActualJson(RequestType.NAME, "cat.*"))
+    assertAboutJson()
+        .that(generateActualJson(RequestType.NAME, "cat.*"))
         .isEqualTo(
             jsonFileBuilder()
                 .addDomain("cat.1.test", "39-1_TEST")
@@ -934,15 +946,16 @@ class RdapDomainSearchActionTest extends RdapSearchActionTestCase<RdapDomainSear
   @Test
   void testDomainMatch_catstar_found_sql() {
     rememberWildcardType("cat*");
-    assertThat(generateActualJson(RequestType.NAME, "cat*"))
+    assertAboutJson()
+        .that(generateActualJson(RequestType.NAME, "cat*"))
         .isEqualTo(
             jsonFileBuilder()
                 .addDomain("cat.1.test", "39-1_TEST")
-                .addDomain("cat2.lol", "17-LOL")
                 .addDomain("cat.example", "21-EXAMPLE")
                 .addDomain("cat.lol", "C-LOL")
-                .setNextQuery("name=cat*&cursor=Y2F0LmxvbA%3D%3D")
-                .load("rdap_domains_four_truncated.json"));
+                .addDomain("cat.みんな", "2D-Q9JYB4C")
+                .setNextQuery("name=cat*&cursor=Y2F0LnhuLS1xOWp5YjRj")
+                .load("rdap_domains_four_with_one_unicode_truncated.json"));
     assertThat(response.getStatus()).isEqualTo(200);
     verifyMetrics(SearchType.BY_DOMAIN_NAME, Optional.of(5L), IncompletenessWarningType.TRUNCATED);
   }
@@ -1058,7 +1071,8 @@ class RdapDomainSearchActionTest extends RdapSearchActionTestCase<RdapDomainSear
     // our way through all of them.
     createManyDomainsAndHosts(4, 50, 2);
     rememberWildcardType("domain*.lol");
-    assertThat(generateActualJson(RequestType.NAME, "domain*.lol"))
+    assertAboutJson()
+        .that(generateActualJson(RequestType.NAME, "domain*.lol"))
         .isEqualTo(
             jsonFileBuilder()
                 .addDomain("domain100.lol", "AC-LOL")
@@ -1106,11 +1120,12 @@ class RdapDomainSearchActionTest extends RdapSearchActionTestCase<RdapDomainSear
   void testDomainMatch_tldSearchOrderedProperly_sql() {
     createManyDomainsAndHosts(4, 1, 2);
     rememberWildcardType("*.lol");
-    assertThat(generateActualJson(RequestType.NAME, "*.lol"))
+    assertAboutJson()
+        .that(generateActualJson(RequestType.NAME, "*.lol"))
         .isEqualTo(
             jsonFileBuilder()
-                .addDomain("cat2.lol", "17-LOL")
                 .addDomain("cat.lol", "C-LOL")
+                .addDomain("cat2.lol", "17-LOL")
                 .addDomain("domain1.lol", "4B-LOL")
                 .addDomain("domain2.lol", "4A-LOL")
                 .setNextQuery("name=*.lol&cursor=ZG9tYWluMi5sb2w%3D")
@@ -1139,7 +1154,8 @@ class RdapDomainSearchActionTest extends RdapSearchActionTestCase<RdapDomainSear
   void testDomainMatch_truncatedResultsAfterMultipleChunks_sql() {
     createManyDomainsAndHosts(5, 6, 2);
     rememberWildcardType("domain*.lol");
-    assertThat(generateActualJson(RequestType.NAME, "domain*.lol"))
+    assertAboutJson()
+        .that(generateActualJson(RequestType.NAME, "domain*.lol"))
         .isEqualTo(
             jsonFileBuilder()
                 .addDomain("domain12.lol", "5A-LOL")
@@ -1159,9 +1175,9 @@ class RdapDomainSearchActionTest extends RdapSearchActionTestCase<RdapDomainSear
         RequestType.NAME,
         "domain*.lol",
         ImmutableList.of(
+            "domain1.lol",
             "domain10.lol",
             "domain11.lol",
-            "domain1.lol",
             "domain2.lol",
             "domain3.lol",
             "domain4.lol",
@@ -1179,11 +1195,11 @@ class RdapDomainSearchActionTest extends RdapSearchActionTestCase<RdapDomainSear
         RequestType.NAME,
         "*.lol",
         ImmutableList.of(
-            "cat2.lol",
             "cat.lol",
+            "cat2.lol",
+            "domain1.lol",
             "domain10.lol",
             "domain11.lol",
-            "domain1.lol",
             "domain2.lol",
             "domain3.lol",
             "domain4.lol",
@@ -1197,7 +1213,8 @@ class RdapDomainSearchActionTest extends RdapSearchActionTestCase<RdapDomainSear
   @Test
   void testNameserverMatch_foundMultiple() {
     rememberWildcardType("ns1.cat.lol");
-    assertThat(generateActualJson(RequestType.NS_LDH_NAME, "ns1.cat.lol"))
+    assertAboutJson()
+        .that(generateActualJson(RequestType.NS_LDH_NAME, "ns1.cat.lol"))
         .isEqualTo(generateExpectedJsonForTwoDomainsNsReply());
     assertThat(response.getStatus()).isEqualTo(200);
     verifyMetrics(SearchType.BY_NAMESERVER_NAME, 2, 1);
@@ -1207,7 +1224,8 @@ class RdapDomainSearchActionTest extends RdapSearchActionTestCase<RdapDomainSear
   void testNameserverMatch_foundMultiple_sameRegistrarRequested() {
     action.registrarParam = Optional.of("TheRegistrar");
     rememberWildcardType("ns1.cat.lol");
-    assertThat(generateActualJson(RequestType.NS_LDH_NAME, "ns1.cat.lol"))
+    assertAboutJson()
+        .that(generateActualJson(RequestType.NS_LDH_NAME, "ns1.cat.lol"))
         .isEqualTo(generateExpectedJsonForTwoDomainsNsReply());
     assertThat(response.getStatus()).isEqualTo(200);
     verifyMetrics(SearchType.BY_NAMESERVER_NAME, 2, 1);
@@ -1251,7 +1269,8 @@ class RdapDomainSearchActionTest extends RdapSearchActionTestCase<RdapDomainSear
   @Test
   void testNameserverMatchWithNoPrefixAndDomainSuffix_found() {
     rememberWildcardType("*.cat.lol");
-    assertThat(generateActualJson(RequestType.NS_LDH_NAME, "*.cat.lol"))
+    assertAboutJson()
+        .that(generateActualJson(RequestType.NS_LDH_NAME, "*.cat.lol"))
         .isEqualTo(generateExpectedJsonForTwoDomainsNsReply());
     assertThat(response.getStatus()).isEqualTo(200);
     verifyMetrics(SearchType.BY_NAMESERVER_NAME, 2, 2);
@@ -1260,7 +1279,8 @@ class RdapDomainSearchActionTest extends RdapSearchActionTestCase<RdapDomainSear
   @Test
   void testNameserverMatchWithOneCharacterPrefixAndDomainSuffix_found() {
     rememberWildcardType("n*.cat.lol");
-    assertThat(generateActualJson(RequestType.NS_LDH_NAME, "n*.cat.lol"))
+    assertAboutJson()
+        .that(generateActualJson(RequestType.NS_LDH_NAME, "n*.cat.lol"))
         .isEqualTo(generateExpectedJsonForTwoDomainsNsReply());
     assertThat(response.getStatus()).isEqualTo(200);
     verifyMetrics(SearchType.BY_NAMESERVER_NAME, 2, 2);
@@ -1270,7 +1290,8 @@ class RdapDomainSearchActionTest extends RdapSearchActionTestCase<RdapDomainSear
   void testNameserverMatchWithOneCharacterPrefixAndDomainSuffix_found_sameRegistrarRequested() {
     action.registrarParam = Optional.of("TheRegistrar");
     rememberWildcardType("n*.cat.lol");
-    assertThat(generateActualJson(RequestType.NS_LDH_NAME, "n*.cat.lol"))
+    assertAboutJson()
+        .that(generateActualJson(RequestType.NS_LDH_NAME, "n*.cat.lol"))
         .isEqualTo(generateExpectedJsonForTwoDomainsNsReply());
     assertThat(response.getStatus()).isEqualTo(200);
     verifyMetrics(SearchType.BY_NAMESERVER_NAME, 2, 2);
@@ -1286,7 +1307,8 @@ class RdapDomainSearchActionTest extends RdapSearchActionTestCase<RdapDomainSear
   @Test
   void testNameserverMatchWithTwoCharacterPrefixAndDomainSuffix_found() {
     rememberWildcardType("ns*.cat.lol");
-    assertThat(generateActualJson(RequestType.NS_LDH_NAME, "ns*.cat.lol"))
+    assertAboutJson()
+        .that(generateActualJson(RequestType.NS_LDH_NAME, "ns*.cat.lol"))
         .isEqualTo(generateExpectedJsonForTwoDomainsNsReply());
     assertThat(response.getStatus()).isEqualTo(200);
     verifyMetrics(SearchType.BY_NAMESERVER_NAME, 2, 2);
@@ -1356,7 +1378,7 @@ class RdapDomainSearchActionTest extends RdapSearchActionTestCase<RdapDomainSear
             .addRegistrar("1.test")
             .addNameserver("ns1.cat.1.test", "35-ROID")
             .addNameserver("ns2.cat.2.test", "37-ROID")
-            .load("rdap_domain_no_contacts_with_remark.json"));
+            .load("rdap_domain_redacted_contacts_with_remark.json"));
     verifyMetrics(SearchType.BY_NAMESERVER_NAME, 1, 1);
   }
 
@@ -1370,7 +1392,7 @@ class RdapDomainSearchActionTest extends RdapSearchActionTestCase<RdapDomainSear
             .addRegistrar("1.test")
             .addNameserver("ns1.cat.1.test", "35-ROID")
             .addNameserver("ns2.cat.2.test", "37-ROID")
-            .load("rdap_domain_no_contacts_with_remark.json"));
+            .load("rdap_domain_redacted_contacts_with_remark.json"));
     verifyMetrics(SearchType.BY_NAMESERVER_NAME, 1, 1);
   }
 
@@ -1563,7 +1585,8 @@ class RdapDomainSearchActionTest extends RdapSearchActionTestCase<RdapDomainSear
     // not trigger the truncation warning because all the domains will be duplicates.
     createManyDomainsAndHosts(4, 1, 36);
     rememberWildcardType("ns*.domain1.lol");
-    assertThat(generateActualJson(RequestType.NS_LDH_NAME, "ns*.domain1.lol"))
+    assertAboutJson()
+        .that(generateActualJson(RequestType.NS_LDH_NAME, "ns*.domain1.lol"))
         .isEqualTo(
             jsonFileBuilder()
                 .addDomain("domain1.lol", "8F-LOL")
@@ -1579,7 +1602,8 @@ class RdapDomainSearchActionTest extends RdapSearchActionTestCase<RdapDomainSear
   void testNameserverMatch_incompleteResultsSet() {
     createManyDomainsAndHosts(2, 1, 41);
     rememberWildcardType("ns*.domain1.lol");
-    assertThat(generateActualJson(RequestType.NS_LDH_NAME, "ns*.domain1.lol"))
+    assertAboutJson()
+        .that(generateActualJson(RequestType.NS_LDH_NAME, "ns*.domain1.lol"))
         .isEqualTo(
             jsonFileBuilder()
                 .addDomain("domain1.lol", "97-LOL")
@@ -1621,7 +1645,8 @@ class RdapDomainSearchActionTest extends RdapSearchActionTestCase<RdapDomainSear
   @Test
   void testAddressMatchV4Address_foundMultiple() {
     rememberWildcardType("1.2.3.4");
-    assertThat(generateActualJson(RequestType.NS_IP, "1.2.3.4"))
+    assertAboutJson()
+        .that(generateActualJson(RequestType.NS_IP, "1.2.3.4"))
         .isEqualTo(generateExpectedJsonForTwoDomainsNsReply());
     assertThat(response.getStatus()).isEqualTo(200);
     verifyMetrics(SearchType.BY_NAMESERVER_ADDRESS, 2, 1);
@@ -1631,7 +1656,8 @@ class RdapDomainSearchActionTest extends RdapSearchActionTestCase<RdapDomainSear
   void testAddressMatchV4Address_foundMultiple_sameRegistrarRequested() {
     action.registrarParam = Optional.of("TheRegistrar");
     rememberWildcardType("1.2.3.4");
-    assertThat(generateActualJson(RequestType.NS_IP, "1.2.3.4"))
+    assertAboutJson()
+        .that(generateActualJson(RequestType.NS_IP, "1.2.3.4"))
         .isEqualTo(generateExpectedJsonForTwoDomainsNsReply());
     assertThat(response.getStatus()).isEqualTo(200);
     verifyMetrics(SearchType.BY_NAMESERVER_ADDRESS, 2, 1);
@@ -1649,7 +1675,7 @@ class RdapDomainSearchActionTest extends RdapSearchActionTestCase<RdapDomainSear
     runSuccessfulTestWithCatLol(
         RequestType.NS_IP,
         "bad:f00d:cafe:0:0:0:15:beef",
-        "rdap_domain_no_contacts_with_remark.json");
+        "rdap_domain_redacted_contacts_with_remark.json");
     verifyMetrics(SearchType.BY_NAMESERVER_ADDRESS, 1, 1);
   }
 
@@ -1711,7 +1737,8 @@ class RdapDomainSearchActionTest extends RdapSearchActionTestCase<RdapDomainSear
     login("evilregistrar");
     persistDomainAsDeleted(domainCatExample, clock.nowUtc().minusDays(1));
     rememberWildcardType("1.2.3.4");
-    assertThat(generateActualJson(RequestType.NS_IP, "1.2.3.4"))
+    assertAboutJson()
+        .that(generateActualJson(RequestType.NS_IP, "1.2.3.4"))
         .isEqualTo(
             wrapInSearchReply(
                 jsonFileBuilder()

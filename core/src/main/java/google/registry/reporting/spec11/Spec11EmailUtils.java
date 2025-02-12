@@ -37,11 +37,13 @@ import google.registry.model.registrar.Registrar;
 import google.registry.model.registrar.RegistrarPoc;
 import google.registry.reporting.spec11.soy.Spec11EmailSoyInfo;
 import google.registry.util.EmailMessage;
+import google.registry.util.Sleeper;
+import jakarta.mail.MessagingException;
+import jakarta.mail.internet.InternetAddress;
 import java.util.List;
 import java.util.Map;
 import javax.inject.Inject;
-import javax.mail.MessagingException;
-import javax.mail.internet.InternetAddress;
+import org.joda.time.Duration;
 import org.joda.time.LocalDate;
 
 /** Provides e-mail functionality for Spec11 tasks, such as sending Spec11 reports to registrars. */
@@ -57,6 +59,8 @@ public class Spec11EmailUtils {
           .build()
           .compileToTofu();
   private final GmailClient gmailClient;
+  private final Sleeper sleeper;
+  private final Duration emailThrottleDuration;
   private final InternetAddress outgoingEmailAddress;
   private final ImmutableList<InternetAddress> spec11BccEmailAddresses;
   private final InternetAddress alertRecipientAddress;
@@ -66,12 +70,16 @@ public class Spec11EmailUtils {
   @Inject
   Spec11EmailUtils(
       GmailClient gmailClient,
+      Sleeper sleeper,
+      @Config("emailThrottleDuration") Duration emailThrottleDuration,
       @Config("newAlertRecipientEmailAddress") InternetAddress alertRecipientAddress,
       @Config("spec11OutgoingEmailAddress") InternetAddress spec11OutgoingEmailAddress,
       @Config("spec11BccEmailAddresses") ImmutableList<InternetAddress> spec11BccEmailAddresses,
       @Config("spec11WebResources") ImmutableList<String> spec11WebResources,
       @Config("registryName") String registryName) {
     this.gmailClient = gmailClient;
+    this.sleeper = sleeper;
+    this.emailThrottleDuration = emailThrottleDuration;
     this.outgoingEmailAddress = spec11OutgoingEmailAddress;
     this.spec11BccEmailAddresses = spec11BccEmailAddresses;
     this.alertRecipientAddress = alertRecipientAddress;
@@ -94,6 +102,13 @@ public class Spec11EmailUtils {
     for (RegistrarThreatMatches registrarThreatMatches : registrarThreatMatchesSet) {
       RegistrarThreatMatches filteredMatches = filterOutNonPublishedMatches(registrarThreatMatches);
       if (!filteredMatches.threatMatches().isEmpty()) {
+        if (numRegistrarsEmailed > 0) {
+          try {
+            sleeper.sleep(emailThrottleDuration);
+          } catch (InterruptedException ie) {
+            throw new RuntimeException(ie);
+          }
+        }
         try {
           // Handle exceptions individually per registrar so that one failed email doesn't prevent
           // the rest from being sent.
@@ -156,15 +171,14 @@ public class Spec11EmailUtils {
     gmailClient.sendEmail(
         EmailMessage.newBuilder()
             .setSubject(subject)
-            .setBody(getContent(date, soyTemplateInfo, registrarThreatMatches))
+            .setBody(getEmailBody(date, soyTemplateInfo, registrarThreatMatches))
             .setContentType(MediaType.HTML_UTF_8)
-            .setFrom(outgoingEmailAddress)
             .addRecipient(getEmailAddressForRegistrar(registrarThreatMatches.clientId()))
             .setBccs(spec11BccEmailAddresses)
             .build());
   }
 
-  private String getContent(
+  private String getEmailBody(
       LocalDate date,
       SoyTemplateInfo soyTemplateInfo,
       RegistrarThreatMatches registrarThreatMatches) {
@@ -175,7 +189,7 @@ public class Spec11EmailUtils {
             .map(
                 threatMatch ->
                     ImmutableMap.of(
-                        "domainName", threatMatch.domainName(),
+                        "domainName", toEmailSafeString(threatMatch.domainName()),
                         "threatType", threatMatch.threatType()))
             .collect(toImmutableList());
 
@@ -190,12 +204,17 @@ public class Spec11EmailUtils {
     return renderer.render();
   }
 
+  // Mutates a known bad domain to pass spam checks by Email sender and clients, as suggested by
+  // the Gmail abuse-detection team.
+  private String toEmailSafeString(String knownUnsafeDomain) {
+    return knownUnsafeDomain.replace(".", "[.]");
+  }
+
   /** Sends an e-mail indicating the state of the spec11 pipeline, with a given subject and body. */
   void sendAlertEmail(String subject, String body) {
     try {
       gmailClient.sendEmail(
           EmailMessage.newBuilder()
-              .setFrom(outgoingEmailAddress)
               .addRecipient(alertRecipientAddress)
               .setBody(body)
               .setSubject(subject)

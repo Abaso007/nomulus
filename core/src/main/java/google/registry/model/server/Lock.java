@@ -15,27 +15,28 @@
 package google.registry.model.server;
 
 import static com.google.common.base.Preconditions.checkArgument;
+import static google.registry.persistence.PersistenceModule.TransactionIsolationLevel.TRANSACTION_REPEATABLE_READ;
 import static google.registry.persistence.transaction.TransactionManagerFactory.tm;
 import static google.registry.util.DateTimeUtils.isAtOrAfter;
 import static google.registry.util.PreconditionsUtils.checkArgumentNotNull;
 
-import com.google.auto.value.AutoValue;
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Strings;
 import com.google.common.flogger.FluentLogger;
 import google.registry.model.ImmutableObject;
 import google.registry.persistence.VKey;
+import google.registry.persistence.transaction.TransactionManager.ThrowingRunnable;
+import jakarta.persistence.Column;
+import jakarta.persistence.Entity;
+import jakarta.persistence.Id;
+import jakarta.persistence.IdClass;
+import jakarta.persistence.PostLoad;
+import jakarta.persistence.Table;
+import jakarta.persistence.Transient;
 import java.io.Serializable;
 import java.util.Optional;
-import java.util.function.Supplier;
+import java.util.concurrent.Callable;
 import javax.annotation.Nullable;
-import javax.persistence.Column;
-import javax.persistence.Entity;
-import javax.persistence.Id;
-import javax.persistence.IdClass;
-import javax.persistence.PostLoad;
-import javax.persistence.Table;
-import javax.persistence.Transient;
 import org.joda.time.DateTime;
 import org.joda.time.Duration;
 
@@ -128,26 +129,11 @@ public class Lock extends ImmutableObject implements Serializable {
     return String.format("%s-%s", scope, resourceName);
   }
 
-  @AutoValue
-  abstract static class AcquireResult {
-    public abstract DateTime transactionTime();
-
-    @Nullable
-    public abstract Lock existingLock();
-
-    @Nullable
-    public abstract Lock newLock();
-
-    public abstract LockState lockState();
-
-    public static AcquireResult create(
-        DateTime transactionTime,
-        @Nullable Lock existingLock,
-        @Nullable Lock newLock,
-        LockState lockState) {
-      return new AutoValue_Lock_AcquireResult(transactionTime, existingLock, newLock, lockState);
-    }
-  }
+  record AcquireResult(
+      DateTime transactionTime,
+      @Nullable Lock existingLock,
+      @Nullable Lock newLock,
+      LockState lockState) {}
 
   private static void logAcquireResult(AcquireResult acquireResult) {
     try {
@@ -184,7 +170,7 @@ public class Lock extends ImmutableObject implements Serializable {
   public static Optional<Lock> acquire(
       String resourceName, @Nullable String tld, Duration leaseLength) {
     String scope = tld != null ? tld : GLOBAL;
-    Supplier<AcquireResult> lockAcquirer =
+    Callable<AcquireResult> lockAcquirer =
         () -> {
           DateTime now = tm().getTransactionTime();
 
@@ -203,15 +189,28 @@ public class Lock extends ImmutableObject implements Serializable {
             lockState = LockState.TIMED_OUT;
           } else {
             lockState = LockState.IN_USE;
-            return AcquireResult.create(now, lock, null, lockState);
+            return new AcquireResult(now, lock, null, lockState);
           }
 
           Lock newLock = create(resourceName, scope, now, leaseLength);
           tm().put(newLock);
 
-          return AcquireResult.create(now, lock, newLock, lockState);
+          return new AcquireResult(now, lock, newLock, lockState);
         };
-    AcquireResult acquireResult = tm().transact(lockAcquirer);
+    /*
+     * Use REPEATABLE READ to avoid write conflicts with other locks.
+     *
+     * <p>Since the Lock table is small, Postgresql may choose table scan instead of PK lookup. At
+     * the SERIALIZABLE level this can cause conflicts with other locks. There is no way to forbid
+     * table scan on a per-query or per-table basis.
+     *
+     * <p>Using REPEATABLE READ is safe since Lock acquire/release only accesses one row. Note that
+     * passing the isolation level to the `transact` method requires that it is not a nested
+     * transaction. As of the time of this change this is the case.
+     *
+     * <p>See b/333537928 for more information.
+     */
+    AcquireResult acquireResult = tm().transact(TRANSACTION_REPEATABLE_READ, lockAcquirer);
 
     logAcquireResult(acquireResult);
     lockMetrics.recordAcquire(resourceName, scope, acquireResult.lockState());
@@ -221,7 +220,7 @@ public class Lock extends ImmutableObject implements Serializable {
   /** Release the lock. */
   public void release() {
     // Just use the default clock because we aren't actually doing anything that will use the clock.
-    Supplier<Void> lockReleaser =
+    ThrowingRunnable lockReleaser =
         () -> {
           // To release a lock, check that no one else has already obtained it and if not
           // delete it. If the lock in the database was different, then this lock is gone already;
@@ -246,9 +245,9 @@ public class Lock extends ImmutableObject implements Serializable {
             logger.atInfo().log(
                 "Not deleting lock: %s - someone else has it: %s", lockId, loadedLock);
           }
-          return null;
         };
-    tm().transact(lockReleaser);
+    // See comments in the `acquire` method for this isolation level.
+    tm().transact(TRANSACTION_REPEATABLE_READ, lockReleaser);
   }
 
   static class LockId extends ImmutableObject implements Serializable {

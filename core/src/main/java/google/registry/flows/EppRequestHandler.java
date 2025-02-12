@@ -17,9 +17,9 @@ package google.registry.flows;
 import static google.registry.flows.FlowUtils.marshalWithLenientRetry;
 import static google.registry.model.eppoutput.Result.Code.SUCCESS_AND_CLOSE;
 import static google.registry.xml.XmlTransformer.prettyPrint;
+import static jakarta.servlet.http.HttpServletResponse.SC_BAD_REQUEST;
+import static jakarta.servlet.http.HttpServletResponse.SC_OK;
 import static java.nio.charset.StandardCharsets.UTF_8;
-import static javax.servlet.http.HttpServletResponse.SC_BAD_REQUEST;
-import static javax.servlet.http.HttpServletResponse.SC_OK;
 
 import com.google.common.flogger.FluentLogger;
 import com.google.common.net.MediaType;
@@ -74,14 +74,6 @@ public class EppRequestHandler {
       if (eppOutput.isResponse()
           && eppOutput.getResponse().getResult().getCode() == SUCCESS_AND_CLOSE) {
         response.setHeader(ProxyHttpHeaders.EPP_SESSION, "close");
-      }
-      // If a login request returns a success, a logged-in header is added to the response to inform
-      // the proxy that it is no longer necessary to send the full client certificate to the backend
-      // for this connection.
-      if (eppOutput.isResponse()
-          && eppOutput.getResponse().isLoginResponse()
-          && eppOutput.isSuccess()) {
-        response.setHeader(ProxyHttpHeaders.LOGGED_IN, "true");
       }
     } catch (Exception e) {
       logger.atWarning().withCause(e).log("handleEppCommand general exception.");

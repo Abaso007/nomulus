@@ -24,6 +24,8 @@ import com.squareup.javapoet.MethodSpec;
 import com.squareup.javapoet.ParameterizedTypeName;
 import com.squareup.javapoet.TypeName;
 import com.squareup.javapoet.TypeSpec;
+import jakarta.persistence.AttributeConverter;
+import jakarta.persistence.Converter;
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.util.List;
@@ -45,12 +47,10 @@ import javax.lang.model.type.TypeKind;
 import javax.lang.model.util.ElementFilter;
 import javax.lang.model.util.Elements;
 import javax.lang.model.util.Types;
-import javax.persistence.AttributeConverter;
-import javax.persistence.Converter;
 
 /** Processor to generate {@link AttributeConverter} for {@code VKey} type. */
 @SupportedAnnotationTypes("google.registry.persistence.WithVKey")
-@SupportedSourceVersion(SourceVersion.RELEASE_8)
+@SupportedSourceVersion(SourceVersion.RELEASE_21)
 public class VKeyProcessor extends AbstractProcessor {
 
   private static final String CONVERTER_CLASS_NAME_TEMP = "VKeyConverter_%s";
@@ -78,7 +78,7 @@ public class VKeyProcessor extends AbstractProcessor {
                               .collect(toImmutableList());
                       checkState(
                           actualAnnotations.size() == 1,
-                          "% can have only one @WithVKey annotation",
+                          "%s can have only one @WithVKey annotation",
                           simpleTypeName);
                       TypeName keyType = null;
                       for (Map.Entry<? extends ExecutableElement, ? extends AnnotationValue> entry :

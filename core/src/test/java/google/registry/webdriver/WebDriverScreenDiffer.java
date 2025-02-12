@@ -18,7 +18,7 @@ import static com.google.common.base.Preconditions.checkArgument;
 import static java.lang.Math.abs;
 import static java.util.stream.Collectors.joining;
 
-import com.google.auto.value.AutoValue;
+import com.google.auto.value.AutoBuilder;
 import com.google.common.collect.Lists;
 import com.google.common.flogger.FluentLogger;
 import java.awt.Color;
@@ -59,35 +59,30 @@ class WebDriverScreenDiffer implements ScreenDiffer {
     this.actualScreenshots = Lists.newArrayList();
   }
 
-  @AutoValue
-  abstract static class ComparisonResult {
-    abstract ActualScreenshot actualScreenshot();
-
-    abstract boolean isConsideredSimilar();
-
-    abstract boolean isMissingGoldenImage();
-
-    abstract boolean isSizeDifferent();
-
-    abstract int numDiffPixels();
+  record ComparisonResult(
+      ActualScreenshot actualScreenshot,
+      boolean isConsideredSimilar,
+      boolean isMissingGoldenImage,
+      boolean isSizeDifferent,
+      int numDiffPixels) {
 
     static Builder builder() {
-      return new AutoValue_WebDriverScreenDiffer_ComparisonResult.Builder();
+      return new AutoBuilder_WebDriverScreenDiffer_ComparisonResult_Builder();
     }
 
-    @AutoValue.Builder
-    abstract static class Builder {
-      abstract Builder setActualScreenshot(ActualScreenshot actualScreenshot);
+    @AutoBuilder
+    interface Builder {
+      Builder setActualScreenshot(ActualScreenshot actualScreenshot);
 
-      abstract Builder setIsConsideredSimilar(boolean isConsideredSimilar);
+      Builder setIsConsideredSimilar(boolean isConsideredSimilar);
 
-      abstract Builder setIsMissingGoldenImage(boolean isMissingGoldenImage);
+      Builder setIsMissingGoldenImage(boolean isMissingGoldenImage);
 
-      abstract Builder setIsSizeDifferent(boolean isSizeDifferent);
+      Builder setIsSizeDifferent(boolean isSizeDifferent);
 
-      abstract Builder setNumDiffPixels(int numDiffPixels);
+      Builder setNumDiffPixels(int numDiffPixels);
 
-      abstract ComparisonResult build();
+      ComparisonResult build();
     }
   }
 
@@ -128,9 +123,10 @@ class WebDriverScreenDiffer implements ScreenDiffer {
                   if (result.isConsideredSimilar()) {
                     logger.atInfo().log(
                         String.format(
-                            "Screenshot test for [%s] passed:\n"
-                                + "  - golden image location: %s\n"
-                                + "  - screenshot image location: %s",
+                            """
+                                Screenshot test for [%s] passed:
+                                  - golden image location: %s
+                                  - screenshot image location: %s""",
                             imageName, goldenImagePath, persistedScreenshot.toAbsolutePath()));
                     return "";
                   } else {
@@ -143,9 +139,10 @@ class WebDriverScreenDiffer implements ScreenDiffer {
                     }
 
                     return String.format(
-                        "Screenshot test for [%s] failed because %s:\n"
-                            + "  - golden image location: %s\n"
-                            + "  - screenshot image location: %s",
+                        """
+                            Screenshot test for [%s] failed because %s:
+                              - golden image location: %s
+                              - screenshot image location: %s""",
                         imageName,
                         diffReason,
                         result.isMissingGoldenImage() ? "missing" : goldenImagePath(imageName),
@@ -181,7 +178,7 @@ class WebDriverScreenDiffer implements ScreenDiffer {
             .setIsSizeDifferent(false)
             .setNumDiffPixels(totalPixels);
 
-    if (!maybeGoldenImage.isPresent()) {
+    if (maybeGoldenImage.isEmpty()) {
       return commonBuilder.setIsMissingGoldenImage(true).build();
     }
     BufferedImage goldenImage = maybeGoldenImage.get();

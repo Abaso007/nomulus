@@ -18,6 +18,7 @@ import static com.google.common.collect.ImmutableSet.toImmutableSet;
 import static org.apache.beam.sdk.values.TypeDescriptors.strings;
 
 import com.google.common.flogger.FluentLogger;
+import google.registry.beam.billing.BillingEvent.BillingEventCoder;
 import google.registry.beam.billing.BillingEvent.InvoiceGroupingKey;
 import google.registry.beam.billing.BillingEvent.InvoiceGroupingKey.InvoiceGroupingKeyCoder;
 import google.registry.beam.common.RegistryJpaIO;
@@ -30,6 +31,7 @@ import google.registry.reporting.billing.BillingModule;
 import google.registry.util.DomainNameUtils;
 import google.registry.util.ResourceUtils;
 import google.registry.util.SqlTemplate;
+import java.io.Serial;
 import java.io.Serializable;
 import java.time.YearMonth;
 import java.util.Objects;
@@ -37,13 +39,13 @@ import java.util.Optional;
 import java.util.regex.Pattern;
 import org.apache.beam.sdk.Pipeline;
 import org.apache.beam.sdk.PipelineResult;
-import org.apache.beam.sdk.coders.SerializableCoder;
 import org.apache.beam.sdk.coders.StringUtf8Coder;
 import org.apache.beam.sdk.io.FileIO;
 import org.apache.beam.sdk.io.TextIO;
 import org.apache.beam.sdk.options.PipelineOptionsFactory;
 import org.apache.beam.sdk.transforms.Contextful;
 import org.apache.beam.sdk.transforms.Count;
+import org.apache.beam.sdk.transforms.Distinct;
 import org.apache.beam.sdk.transforms.Filter;
 import org.apache.beam.sdk.transforms.MapElements;
 import org.apache.beam.sdk.transforms.PTransform;
@@ -65,7 +67,7 @@ import org.joda.money.CurrencyUnit;
  */
 public class InvoicingPipeline implements Serializable {
 
-  private static final long serialVersionUID = 5386330443625580081L;
+  @Serial private static final long serialVersionUID = 5386330443625580081L;
 
   private static final Pattern SQL_COMMENT_REGEX =
       Pattern.compile("^\\s*--.*\\n", Pattern.MULTILINE);
@@ -97,13 +99,11 @@ public class InvoicingPipeline implements Serializable {
     Read<Object[], google.registry.beam.billing.BillingEvent> read =
         RegistryJpaIO.<Object[], google.registry.beam.billing.BillingEvent>read(
                 makeCloudSqlQuery(options.getYearMonth()), false, row -> parseRow(row).orElse(null))
-            .withCoder(SerializableCoder.of(google.registry.beam.billing.BillingEvent.class));
-
-    PCollection<google.registry.beam.billing.BillingEvent> billingEventsWithNulls =
-        pipeline.apply("Read BillingEvents from Cloud SQL", read);
-
-    // Remove null billing events
-    return billingEventsWithNulls.apply(Filter.by(Objects::nonNull));
+            .withCoder(BillingEventCoder.ofNullable());
+    return pipeline
+        .apply("Read BillingEvents from Cloud SQL", read)
+        .apply("Remove null elements", Filter.by(Objects::nonNull))
+        .apply("Remove duplicates", Distinct.create());
   }
 
   private static Optional<google.registry.beam.billing.BillingEvent> parseRow(Object[] row) {
@@ -142,7 +142,7 @@ public class InvoicingPipeline implements Serializable {
       extends PTransform<
           PCollection<google.registry.beam.billing.BillingEvent>, PCollection<String>> {
 
-    private static final long serialVersionUID = -8090619008258393728L;
+    @Serial private static final long serialVersionUID = -8090619008258393728L;
 
     @Override
     public PCollection<String> expand(
@@ -152,9 +152,9 @@ public class InvoicingPipeline implements Serializable {
               "Map to invoicing key",
               MapElements.into(TypeDescriptor.of(InvoiceGroupingKey.class))
                   .via(google.registry.beam.billing.BillingEvent::getInvoiceGroupingKey))
+          .setCoder(InvoiceGroupingKeyCoder.of())
           .apply(
               "Filter out free events", Filter.by((InvoiceGroupingKey key) -> key.unitPrice() != 0))
-          .setCoder(new InvoiceGroupingKeyCoder())
           .apply("Count occurrences", Count.perElement())
           .apply(
               "Format as CSVs",
@@ -163,7 +163,12 @@ public class InvoicingPipeline implements Serializable {
     }
   }
 
-  /** Saves the billing events to a single overall invoice CSV file. */
+  /**
+   * Saves the billing events to a single overall invoice CSV file. TextIO always produces the file
+   * of type text/plain, which we then update to desired text/csv before sending an email to billing
+   * team {@link google.registry.reporting.billing.BillingEmailUtils#emailOverallInvoice()
+   * emailOverallInvoice}
+   */
   static void saveInvoiceCsv(
       PCollection<google.registry.beam.billing.BillingEvent> billingEvents,
       InvoicingPipelineOptions options) {
@@ -217,10 +222,10 @@ public class InvoicingPipeline implements Serializable {
         SqlTemplate.create(
                 ResourceUtils.readResourceUtf8(
                     InvoicingPipeline.class, "sql/cloud_sql_billing_events.sql"))
-            .put("FIRST_TIMESTAMP_OF_MONTH", yearMonth + "-01")
+            .put("FIRST_TIMESTAMP_OF_MONTH", yearMonth + "-01T00:00:00Z")
             .put(
                 "LAST_TIMESTAMP_OF_MONTH",
-                String.format("%d-%d-01", endMonth.getYear(), endMonth.getMonthValue()))
+                String.format("%d-%d-01T00:00:00Z", endMonth.getYear(), endMonth.getMonthValue()))
             .build();
     // Remove the comments from the query string
     return SQL_COMMENT_REGEX.matcher(queryWithComments).replaceAll("");
