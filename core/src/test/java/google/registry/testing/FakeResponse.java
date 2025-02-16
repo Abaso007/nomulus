@@ -22,7 +22,14 @@ import static java.util.Collections.unmodifiableMap;
 import com.google.common.base.Throwables;
 import com.google.common.net.MediaType;
 import google.registry.request.Response;
+import jakarta.servlet.http.Cookie;
+import jakarta.servlet.http.HttpServletResponse;
+import java.io.IOException;
+import java.io.PrintWriter;
+import java.io.StringWriter;
+import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import org.joda.time.DateTime;
 
@@ -35,6 +42,11 @@ public final class FakeResponse implements Response {
   private final Map<String, Object> headers = new HashMap<>();
   private boolean wasMutuallyExclusiveResponseSet;
   private String lastResponseStackTrace;
+
+  private final StringWriter writer = new StringWriter();
+  private PrintWriter printWriter = new PrintWriter(writer);
+
+  private ArrayList<Cookie> cookies = new ArrayList<>();
 
   public int getStatus() {
     return status;
@@ -50,6 +62,16 @@ public final class FakeResponse implements Response {
 
   public Map<String, Object> getHeaders() {
     return unmodifiableMap(headers);
+  }
+
+  public StringWriter getStringWriter() {
+    return writer;
+  }
+
+  @Override
+  public void sendRedirect(String url) throws IOException {
+    status = HttpServletResponse.SC_FOUND;
+    this.payload = String.format("Redirected to %s", url);
   }
 
   @Override
@@ -83,6 +105,20 @@ public final class FakeResponse implements Response {
     headers.put(checkNotNull(header), checkNotNull(timestamp));
   }
 
+  @Override
+  public void addCookie(Cookie cookie) {
+    cookies.add(cookie);
+  }
+
+  @Override
+  public PrintWriter getWriter() throws IOException {
+    return printWriter;
+  }
+
+  public List<Cookie> getCookies() {
+    return cookies;
+  }
+
   private void checkResponsePerformedOnce() {
     checkState(
         !wasMutuallyExclusiveResponseSet,
@@ -99,4 +135,5 @@ public final class FakeResponse implements Response {
       return Throwables.getStackTraceAsString(e);
     }
   }
+
 }

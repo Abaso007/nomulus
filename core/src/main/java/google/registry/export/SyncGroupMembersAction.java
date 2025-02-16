@@ -20,8 +20,8 @@ import static google.registry.persistence.transaction.TransactionManagerFactory.
 import static google.registry.request.Action.Method.POST;
 import static google.registry.util.CollectionUtils.nullToEmpty;
 import static google.registry.util.RegistrarUtils.normalizeRegistrarId;
-import static javax.servlet.http.HttpServletResponse.SC_INTERNAL_SERVER_ERROR;
-import static javax.servlet.http.HttpServletResponse.SC_OK;
+import static jakarta.servlet.http.HttpServletResponse.SC_INTERNAL_SERVER_ERROR;
+import static jakarta.servlet.http.HttpServletResponse.SC_OK;
 
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
@@ -33,7 +33,9 @@ import google.registry.groups.GroupsConnection;
 import google.registry.groups.GroupsConnection.Role;
 import google.registry.model.registrar.Registrar;
 import google.registry.model.registrar.RegistrarPoc;
+import google.registry.model.registrar.RegistrarPocBase;
 import google.registry.request.Action;
+import google.registry.request.Action.GaeService;
 import google.registry.request.Response;
 import google.registry.request.auth.Auth;
 import google.registry.util.Retrier;
@@ -52,10 +54,10 @@ import javax.inject.Inject;
  * <p>This uses the <a href="https://developers.google.com/admin-sdk/directory/">Directory API</a>.
  */
 @Action(
-    service = Action.Service.BACKEND,
+    service = GaeService.BACKEND,
     path = "/_dr/task/syncGroupMembers",
     method = POST,
-    auth = Auth.AUTH_API_ADMIN)
+    auth = Auth.AUTH_ADMIN)
 public final class SyncGroupMembersAction implements Runnable {
 
   private static final FluentLogger logger = FluentLogger.forEnclosingClass();
@@ -99,7 +101,7 @@ public final class SyncGroupMembersAction implements Runnable {
    * Returns the Google Groups email address for the given registrar ID and RegistrarContact.Type.
    */
   public static String getGroupEmailAddressForContactType(
-      String registrarId, RegistrarPoc.Type type, String gSuiteDomainName) {
+      String registrarId, RegistrarPocBase.Type type, String gSuiteDomainName) {
     // Take the registrar's ID, make it lowercase, and remove all characters that aren't
     // alphanumeric, hyphens, or underscores.
     return String.format(
@@ -174,7 +176,7 @@ public final class SyncGroupMembersAction implements Runnable {
       Set<RegistrarPoc> registrarPocs = registrar.getContacts();
       long totalAdded = 0;
       long totalRemoved = 0;
-      for (final RegistrarPoc.Type type : RegistrarPoc.Type.values()) {
+      for (final RegistrarPocBase.Type type : RegistrarPocBase.Type.values()) {
         groupKey =
             getGroupEmailAddressForContactType(registrar.getRegistrarId(), type, gSuiteDomainName);
         Set<String> currentMembers = groupsConnection.getMembersOfGroup(groupKey);

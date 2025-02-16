@@ -14,7 +14,7 @@
 
 package google.registry.tmch;
 
-import static javax.servlet.http.HttpServletResponse.SC_OK;
+import static jakarta.servlet.http.HttpServletResponse.SC_OK;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
@@ -25,9 +25,7 @@ import google.registry.testing.FakeClock;
 import google.registry.testing.FakeUrlConnectionService;
 import google.registry.testing.TestCacheExtension;
 import java.net.HttpURLConnection;
-import java.net.URL;
 import java.time.Duration;
-import java.util.ArrayList;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.junit.jupiter.api.extension.RegisterExtension;
@@ -55,9 +53,8 @@ abstract class TmchActionTestCase {
   final Marksdb marksdb = new Marksdb();
 
   protected final HttpURLConnection httpUrlConnection = mock(HttpURLConnection.class);
-  protected final ArrayList<URL> connectedUrls = new ArrayList<>();
   protected FakeUrlConnectionService urlConnectionService =
-      new FakeUrlConnectionService(httpUrlConnection, connectedUrls);
+      new FakeUrlConnectionService(httpUrlConnection);
 
   @BeforeEach
   public void beforeEachTmchActionTestCase() throws Exception {

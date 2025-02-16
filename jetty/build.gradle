@@ -1,0 +1,139 @@
+// Copyright 2024 The Nomulus Authors. All Rights Reserved.
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+apply plugin: 'war'
+
+tasks.register('copyJettyBase', Copy) {
+    from(layout.projectDirectory.dir('src/main')) {
+        include 'jetty-base/**'
+    }
+    into layout.buildDirectory
+}
+
+war {
+    setArchiveBaseName("nomulus")
+    setDestinationDirectory(layout.buildDirectory.dir('jetty-base/webapps'))
+    dependsOn(tasks.named('copyJettyBase'))
+}
+
+tasks.named('compileTestJava') {
+    // Gradle insists on this execution dependency.
+    dependsOn(tasks.named('copyJettyBase'))
+}
+
+dependencies {
+    implementation project(':core')
+}
+
+tasks.register('copyConsole', Copy) {
+    from("${rootDir}/console-webapp/staged/dist") {
+        include "**/*"
+    }
+    into layout.buildDirectory.dir('jetty-base/webapps/console')
+    dependsOn(':console-webapp:buildConsoleWebapp')
+}
+
+tasks.register('stage') {
+    dependsOn(tasks.named('war'))
+    dependsOn(tasks.named('copyConsole'))
+}
+
+tasks.register('buildNomulusImage', Exec) {
+    commandLine 'docker', 'build', '-t', 'nomulus', '.'
+    dependsOn(tasks.named('stage'))
+}
+
+tasks.register('tagNomulusImage', Exec) {
+    commandLine 'docker', 'tag', 'nomulus', "gcr.io/${rootProject.gcpProject}/nomulus"
+    dependsOn(tasks.named('buildNomulusImage'))
+}
+
+tasks.register('pushNomulusImage', Exec) {
+    configure verifyDeploymentConfig
+    commandLine 'docker', 'push', "gcr.io/${rootProject.gcpProject}/nomulus"
+    dependsOn(tasks.named('tagNomulusImage'))
+}
+
+tasks.register('run', JavaExec) {
+    // We do the check when the task actually runs, not when we define it.
+    // This way if one doesn't set the value, one can still run other tasks.
+    doFirst {
+        def jetty_home = System.getenv('JETTY_HOME')
+        if (jetty_home == null) {
+            throw new GradleException('JETTY_HOME is not set.')
+        }
+    }
+    def jetty_home = System.getenv('JETTY_HOME')
+    def environment = rootProject.environment
+    workingDir(layout.buildDirectory.dir('jetty-base'))
+    classpath = files(jetty_home + '/start.jar')
+    systemProperty('google.registry.environment', environment)
+    systemProperty('java.util.logging.config.file', "${projectDir}/logging.properties")
+    dependsOn(tasks.named('stage'))
+}
+
+tasks.register('buildDeployer', Exec) {
+    workingDir("${rootDir}/release/builder/")
+    commandLine 'go', 'build', '-o', "${buildDir}/deployer", 'deployCloudSchedulerAndQueue.go'
+}
+
+// Once GKE is the only option, we can use the same task in the root project instead.
+tasks.register('deployCloudSchedulerAndQueue') {
+    configure verifyDeploymentConfig
+    dependsOn(tasks.named('deployCloudScheduler'), tasks.named('deployQueue'))
+}
+
+tasks.register('deployCloudScheduler', Exec) {
+    dependsOn(tasks.named('buildDeployer'))
+    workingDir("$buildDir")
+    commandLine './deployer',
+        "${rootDir}/core/src/main/java/google/registry/config/files/nomulus-config-${rootProject.environment}.yaml",
+        "${rootDir}/core/src/main/java/google/registry/config/files/tasks/cloud-scheduler-tasks-${rootProject.environment}.xml",
+        rootProject.gcpProject, '--gke'
+    // Only deploy the tasks after Nomulus itself is deployed.
+    mustRunAfter(tasks.named('deployToGke'))
+}
+
+tasks.register('deployQueue', Exec) {
+    dependsOn(tasks.named('buildDeployer'))
+    workingDir("$buildDir")
+    commandLine './deployer',
+        "${rootDir}/core/src/main/java/google/registry/config/files/nomulus-config-${rootProject.environment}.yaml",
+        "${rootDir}/core/src/main/java/google/registry/config/files/cloud-tasks-queue.xml",
+        rootProject.gcpProject, '--gke'
+    // Only deploy the queues after Nomulus itself is deployed.
+    mustRunAfter(tasks.named('deployToGke'))
+}
+
+tasks.register('deployToGke', Exec) {
+    dependsOn('pushNomulusImage', ':proxy:pushProxyImage')
+    commandLine './deploy-nomulus-for-env.sh', "${rootProject.environment}", "${rootProject.baseDomain}"
+}
+
+tasks.register('deployNomulus') {
+    dependsOn('deployToGke', 'deployCloudSchedulerAndQueue')
+}
+
+tasks.register('getEndpoints', Exec) {
+    doFirst {
+        if (rootProject.ext.gcpProject == null) {
+            def error = 'You must specify -Penvironment={alpha,crash,qa}'
+            System.err.println("\033[33;1m${error}\033[0m")
+            throw GradleException("Aborting:  ${error}")
+        }
+    }
+    commandLine './get-endpoints.py', "${rootProject.gcpProject}"
+}
+
+project.build.dependsOn(tasks.named('buildNomulusImage'))

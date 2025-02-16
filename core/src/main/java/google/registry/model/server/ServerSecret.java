@@ -21,11 +21,11 @@ import com.google.common.annotations.VisibleForTesting;
 import com.google.common.primitives.Longs;
 import google.registry.model.CacheUtils;
 import google.registry.model.common.CrossTldSingleton;
+import jakarta.persistence.Column;
+import jakarta.persistence.Entity;
 import java.nio.ByteBuffer;
 import java.util.Optional;
 import java.util.UUID;
-import javax.persistence.Column;
-import javax.persistence.Entity;
 
 /** A secret number used for generating tokens (such as XSRF tokens). */
 @Entity
@@ -46,7 +46,7 @@ public class ServerSecret extends CrossTldSingleton {
               // Make sure we're in a transaction and attempt to load any existing secret, then
               // create it if it's absent.
               Optional<ServerSecret> secret = tm().loadSingleton(ServerSecret.class);
-              if (!secret.isPresent()) {
+              if (secret.isEmpty()) {
                 secret = Optional.of(create(UUID.randomUUID()));
                 tm().insert(secret.get());
               }

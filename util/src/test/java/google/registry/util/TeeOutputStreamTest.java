@@ -45,9 +45,9 @@ class TeeOutputStreamTest {
     outputB.write("b".getBytes(UTF_8));
     outputC.write("c".getBytes(UTF_8));
     // Check the results.
-    assertThat(outputA.toString()).isEqualTo("hello world!a");
-    assertThat(outputB.toString()).isEqualTo("hello world!b");
-    assertThat(outputC.toString()).isEqualTo("hello world!c");
+    assertThat(outputA.toString(UTF_8)).isEqualTo("hello world!a");
+    assertThat(outputB.toString(UTF_8)).isEqualTo("hello world!b");
+    assertThat(outputC.toString(UTF_8)).isEqualTo("hello world!c");
   }
 
   @Test

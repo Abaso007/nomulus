@@ -16,11 +16,10 @@ package google.registry.tools;
 
 import com.beust.jcommander.Parameter;
 import com.beust.jcommander.Parameters;
-import java.io.FileOutputStream;
 import java.io.IOException;
 import java.nio.file.Path;
 import org.flywaydb.core.Flyway;
-import org.testcontainers.containers.BindMode;
+import org.flywaydb.database.postgresql.PostgreSQLConfigurationExtension;
 import org.testcontainers.containers.Container;
 
 /**
@@ -35,9 +34,6 @@ public class DumpGoldenSchemaCommand extends PostgresqlCommand {
 
   // The mount point in the container.
   private static final String CONTAINER_MOUNT_POINT = "/tmp/pg_dump.out";
-
-  // Temporary workaround to fix permission issues on certain Linux distro (e. g. Arch Linux).
-  private static final String CONTAINER_MOUNT_POINT_TMP = "/tmp/pg_dump.tmp";
 
   @Parameter(
       names = {"--output", "-o"},
@@ -55,6 +51,10 @@ public class DumpGoldenSchemaCommand extends PostgresqlCommand {
                 postgresContainer.getUsername(),
                 postgresContainer.getPassword())
             .load();
+
+    PostgreSQLConfigurationExtension configurationExtension =
+        flyway.getConfigurationExtension(PostgreSQLConfigurationExtension.class);
+    configurationExtension.setTransactionalLock(false);
     flyway.migrate();
 
     String userName = postgresContainer.getUsername();
@@ -64,19 +64,7 @@ public class DumpGoldenSchemaCommand extends PostgresqlCommand {
     if (result.getExitCode() != 0) {
       throw new RuntimeException(result.toString());
     }
-    result =
-        postgresContainer.execInContainer("cp", CONTAINER_MOUNT_POINT_TMP, CONTAINER_MOUNT_POINT);
-    if (result.getExitCode() != 0) {
-      throw new RuntimeException(result.toString());
-    }
-  }
-
-  @Override
-  protected void onContainerCreate() throws IOException {
-    // open the output file for write so we can mount it.
-    new FileOutputStream(output.toFile()).close();
-    postgresContainer.withFileSystemBind(
-        output.toString(), CONTAINER_MOUNT_POINT, BindMode.READ_WRITE);
+    postgresContainer.copyFileFromContainer(CONTAINER_MOUNT_POINT, output.toString());
   }
 
   private static String[] getSchemaDumpCommand(String username, String dbName) {
@@ -87,7 +75,7 @@ public class DumpGoldenSchemaCommand extends PostgresqlCommand {
       "-U",
       username,
       "-f",
-      CONTAINER_MOUNT_POINT_TMP,
+      CONTAINER_MOUNT_POINT,
       "--schema-only",
       "--no-owner",
       "--no-privileges",

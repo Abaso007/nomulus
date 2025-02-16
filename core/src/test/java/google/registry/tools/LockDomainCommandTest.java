@@ -26,7 +26,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import com.google.common.collect.ImmutableList;
 import google.registry.model.domain.Domain;
-import google.registry.model.registrar.Registrar.Type;
+import google.registry.model.registrar.RegistrarBase.Type;
 import google.registry.testing.CloudTasksHelper;
 import google.registry.testing.DatabaseHelper;
 import google.registry.testing.DeterministicStringGenerator;
@@ -50,6 +50,7 @@ class LockDomainCommandTest extends CommandTestCase<LockDomainCommand> {
             new DeterministicStringGenerator(Alphabets.BASE_58),
             "adminreg",
             new CloudTasksHelper(fakeClock).getTestCloudTasksUtils());
+    command.printStream = System.out;
   }
 
   @Test

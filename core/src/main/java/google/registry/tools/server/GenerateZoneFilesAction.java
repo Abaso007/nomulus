@@ -33,6 +33,7 @@ import google.registry.model.domain.secdns.DomainDsData;
 import google.registry.model.host.Host;
 import google.registry.model.tld.Tld;
 import google.registry.request.Action;
+import google.registry.request.Action.GaeService;
 import google.registry.request.HttpException.BadRequestException;
 import google.registry.request.JsonActionRunner;
 import google.registry.request.auth.Auth;
@@ -62,10 +63,10 @@ import org.joda.time.Duration;
  * days in the past, and must be at midnight UTC.
  */
 @Action(
-    service = Action.Service.TOOLS,
+    service = GaeService.TOOLS,
     path = GenerateZoneFilesAction.PATH,
     method = POST,
-    auth = Auth.AUTH_API_ADMIN)
+    auth = Auth.AUTH_ADMIN)
 public class GenerateZoneFilesAction implements Runnable, JsonActionRunner.JsonAction {
 
   private static final FluentLogger log = FluentLogger.forEnclosingClass();
@@ -159,7 +160,7 @@ public class GenerateZoneFilesAction implements Runnable, JsonActionRunner.JsonA
 
   private ImmutableList<String> getStanzasForTld(String tld, DateTime exportTime) {
     ImmutableList.Builder<String> result = new ImmutableList.Builder<>();
-    ScrollableResults scrollableResults =
+    ScrollableResults<Domain> scrollableResults =
         tm().query("FROM Domain WHERE tld = :tld AND deletionTime > :exportTime")
             .setParameter("tld", tld)
             .setParameter("exportTime", exportTime)
@@ -167,7 +168,7 @@ public class GenerateZoneFilesAction implements Runnable, JsonActionRunner.JsonA
             .setCacheMode(CacheMode.IGNORE)
             .scroll(ScrollMode.FORWARD_ONLY);
     for (int i = 1; scrollableResults.next(); i = (i + 1) % BATCH_SIZE) {
-      Domain domain = (Domain) scrollableResults.get(0);
+      Domain domain = scrollableResults.get();
       populateStanzasForDomain(domain, exportTime, result);
       if (i == 0) {
         tm().getEntityManager().flush();

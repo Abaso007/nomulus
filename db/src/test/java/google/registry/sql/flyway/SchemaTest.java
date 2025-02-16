@@ -26,6 +26,7 @@ import java.net.URL;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Paths;
 import org.flywaydb.core.Flyway;
+import org.flywaydb.database.postgresql.PostgreSQLConfigurationExtension;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.DisabledIfSystemProperty;
 import org.junit.jupiter.api.condition.EnabledIfSystemProperty;
@@ -77,8 +78,8 @@ class SchemaTest {
    * easier to update the golden schema this way.
    */
   @Container
-  private PostgreSQLContainer sqlContainer =
-      new PostgreSQLContainer<>(NomulusPostgreSql.getDockerTag())
+  private final PostgreSQLContainer<?> sqlContainer =
+      new PostgreSQLContainer<>(NomulusPostgreSql.getDockerImageName())
           .withClasspathResourceMapping(
               MOUNTED_RESOURCE_PATH, CONTAINER_MOUNT_POINT, BindMode.READ_WRITE);
 
@@ -91,6 +92,10 @@ class SchemaTest {
             .dataSource(
                 sqlContainer.getJdbcUrl(), sqlContainer.getUsername(), sqlContainer.getPassword())
             .load();
+
+    PostgreSQLConfigurationExtension configurationExtension =
+        flyway.getConfigurationExtension(PostgreSQLConfigurationExtension.class);
+    configurationExtension.setTransactionalLock(false);
 
     // flyway.migrate() returns the number of newly pushed scripts. This is a variable
     // number as our schema evolves.
@@ -116,15 +121,19 @@ class SchemaTest {
   @Test
   @EnabledIfSystemProperty(named = "deploy_to_existing_db", matches = ".*")
   void deploySchema_existingDb() {
-    // Initialize database with the base schema, which is on the classpath.
+    // Initialize the database with the base schema, which is on the classpath.
     Flyway flyway =
         Flyway.configure()
             .locations("sql/flyway")
             .dataSource(
                 sqlContainer.getJdbcUrl(), sqlContainer.getUsername(), sqlContainer.getPassword())
             .load();
+    PostgreSQLConfigurationExtension configurationExtension =
+        flyway.getConfigurationExtension(PostgreSQLConfigurationExtension.class);
+    configurationExtension.setTransactionalLock(false);
+
     flyway.migrate();
-    logger.atInfo().log("Base schema version: %s", flyway.info().current().getVersion().toString());
+    logger.atInfo().log("Base schema version: %s", flyway.info().current().getVersion());
 
     // Deploy latest scripts from resources directory.
     flyway =
@@ -133,10 +142,12 @@ class SchemaTest {
             .dataSource(
                 sqlContainer.getJdbcUrl(), sqlContainer.getUsername(), sqlContainer.getPassword())
             .load();
+    configurationExtension =
+        flyway.getConfigurationExtension(PostgreSQLConfigurationExtension.class);
+    configurationExtension.setTransactionalLock(false);
     flyway.migrate();
     flyway.validate();
-    logger.atInfo().log(
-        "Latest schema version: %s", flyway.info().current().getVersion().toString());
+    logger.atInfo().log("Latest schema version: %s", flyway.info().current().getVersion());
   }
 
   private static String[] getSchemaDumpCommand(String username, String dbName) {

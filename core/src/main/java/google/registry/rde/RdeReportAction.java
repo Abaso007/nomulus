@@ -36,6 +36,7 @@ import google.registry.model.rde.RdeRevision;
 import google.registry.model.tld.Tld;
 import google.registry.rde.EscrowTaskRunner.EscrowTask;
 import google.registry.request.Action;
+import google.registry.request.Action.GaeService;
 import google.registry.request.HttpException.NoContentException;
 import google.registry.request.Parameter;
 import google.registry.request.RequestParameters;
@@ -53,10 +54,10 @@ import org.joda.time.Duration;
  * Action that uploads a small XML RDE report to ICANN after {@link RdeUploadAction} has finished.
  */
 @Action(
-    service = Action.Service.BACKEND,
+    service = GaeService.BACKEND,
     path = RdeReportAction.PATH,
     method = POST,
-    auth = Auth.AUTH_API_ADMIN)
+    auth = Auth.AUTH_ADMIN)
 public final class RdeReportAction implements Runnable, EscrowTask {
 
   private static final FluentLogger logger = FluentLogger.forEnclosingClass();
@@ -99,7 +100,7 @@ public final class RdeReportAction implements Runnable, EscrowTask {
         RdeRevision.getCurrentRevision(tld, watermark, FULL)
             .orElseThrow(
                 () -> new IllegalStateException("RdeRevision was not set on generated deposit"));
-    if (!prefix.isPresent()) {
+    if (prefix.isEmpty()) {
       prefix = Optional.of(findMostRecentPrefixForWatermark(watermark, bucket, tld, gcsUtils));
     }
     String name = prefix.get() + RdeNamingUtils.makeRydeFilename(tld, watermark, FULL, 1, revision);

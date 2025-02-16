@@ -1,4 +1,4 @@
-// Copyright 2022 The Nomulus Authors. All Rights Reserved.
+// Copyright 2024 The Nomulus Authors. All Rights Reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -11,12 +11,12 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-
 def consoleDir = "${rootDir}/console-webapp"
+def projectParam = "--project=${rootProject.gcpProject}"
 
 clean {
   delete "${consoleDir}/node_modules"
-  delete "${consoleDir}/dist"
+  delete "${consoleDir}/staged/dist"
 }
 
 task npmInstallDeps(type: Exec) {
@@ -37,17 +37,16 @@ task runConsoleWebappUnitTests(type: Exec) {
   args 'run', 'test'
 }
 
-task buildConsoleWebappNonProd(type: Exec) {
+task buildConsoleWebapp(type: Exec) {
   workingDir "${consoleDir}/"
   executable 'npm'
-  args 'run', 'build'
-}
-
-// Keeping the same as non prod for now before we figure out optimization we want to include
-task buildConsoleWebappProd(type: Exec) {
-  workingDir "${consoleDir}/"
-  executable 'npm'
-  args 'run', 'build'
+  def configuration = project.hasProperty('configuration') ?
+    project.getProperty('configuration') :
+    'production'
+  args 'run', "build", "--configuration=${configuration}"
+  doFirst {
+    println "Building console for environment: ${configuration}"
+  }
 }
 
 task applyFormatting(type: Exec) {
@@ -62,8 +61,16 @@ task checkFormatting(type: Exec) {
   args 'run', 'prettify:check'
 }
 
+task deploy(type: Exec) {
+  workingDir "${consoleDir}/staged"
+  executable 'gcloud'
+  args 'app', 'deploy', "${projectParam}", '--quiet'
+}
+
+tasks.buildConsoleWebapp.dependsOn(tasks.npmInstallDeps)
 tasks.runConsoleWebappUnitTests.dependsOn(tasks.npmInstallDeps)
-tasks.buildConsoleWebappProd.dependsOn(tasks.npmInstallDeps)
 tasks.applyFormatting.dependsOn(tasks.npmInstallDeps)
 tasks.checkFormatting.dependsOn(tasks.npmInstallDeps)
 tasks.build.dependsOn(tasks.checkFormatting)
+tasks.build.dependsOn(tasks.runConsoleWebappUnitTests)
+tasks.deploy.dependsOn(tasks.buildConsoleWebapp)

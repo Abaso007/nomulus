@@ -78,6 +78,7 @@ import google.registry.persistence.VKey;
 import google.registry.persistence.transaction.JpaTransactionManagerExtension;
 import google.registry.testing.DatabaseHelper;
 import google.registry.xml.ValidationMode;
+import java.util.Optional;
 import java.util.regex.Pattern;
 import javax.annotation.Nullable;
 import org.joda.money.Money;
@@ -139,7 +140,7 @@ class DomainInfoFlowTest extends ResourceFlowTestCase<DomainInfoFlow, Domain> {
                 .setLastEppUpdateTime(DateTime.parse("1999-12-03T09:00:00.0Z"))
                 .setLastTransferTime(DateTime.parse("2000-04-08T09:00:00.0Z"))
                 .setRegistrationExpirationTime(DateTime.parse("2005-04-03T22:00:00.0Z"))
-                .setRegistrant(registrant.createVKey())
+                .setRegistrant(Optional.of(registrant.createVKey()))
                 .setContacts(
                     ImmutableSet.of(
                         DesignatedContact.create(Type.ADMIN, contact.createVKey()),
@@ -225,6 +226,26 @@ class DomainInfoFlowTest extends ResourceFlowTestCase<DomainInfoFlow, Domain> {
   @Test
   void testSuccess_allHosts() throws Exception {
     doSuccessfulTest("domain_info_response.xml");
+  }
+
+  @Test
+  void testSuccess_noRegistrant() throws Exception {
+    persistTestEntities(false);
+    domain = persistResource(domain.asBuilder().setRegistrant(Optional.empty()).build());
+    doSuccessfulTest("domain_info_response_no_registrant.xml", false);
+  }
+
+  @Test
+  void testSuccess_noContacts() throws Exception {
+    persistTestEntities(false);
+    domain =
+        persistResource(
+            domain
+                .asBuilder()
+                .setRegistrant(Optional.empty())
+                .setContacts(ImmutableSet.of())
+                .build());
+    doSuccessfulTest("domain_info_response_no_contacts.xml", false);
   }
 
   @Test
@@ -711,7 +732,7 @@ class DomainInfoFlowTest extends ResourceFlowTestCase<DomainInfoFlow, Domain> {
             "COMMAND", "create",
             "DESCRIPTION", "create",
             "PERIOD", "2",
-            "FEE", "26.00"),
+            "FEE", "24.00"),
         true);
   }
 
@@ -1097,8 +1118,9 @@ class DomainInfoFlowTest extends ResourceFlowTestCase<DomainInfoFlow, Domain> {
                 .setAllowedTlds(ImmutableSet.of("foo"))
                 .setAllowedRegistrarIds(ImmutableSet.of("NewRegistrar"))
                 .setRenewalPriceBehavior(RenewalPriceBehavior.SPECIFIED)
+                .setRenewalPrice(Money.of(USD, 0))
                 .setAllowedEppActions(ImmutableSet.of(CommandName.CREATE))
-                .setDiscountFraction(1)
+                .setDiscountFraction(1.0)
                 .build());
     domain = domain.asBuilder().setCurrentBulkToken(token.createVKey()).build();
     persistResource(domain);
@@ -1118,8 +1140,9 @@ class DomainInfoFlowTest extends ResourceFlowTestCase<DomainInfoFlow, Domain> {
                 .setAllowedTlds(ImmutableSet.of("foo"))
                 .setAllowedRegistrarIds(ImmutableSet.of("NewRegistrar"))
                 .setRenewalPriceBehavior(RenewalPriceBehavior.SPECIFIED)
+                .setRenewalPrice(Money.of(USD, 0))
                 .setAllowedEppActions(ImmutableSet.of(CommandName.CREATE))
-                .setDiscountFraction(1)
+                .setDiscountFraction(1.0)
                 .build());
     domain = domain.asBuilder().setCurrentBulkToken(token.createVKey()).build();
     persistResource(domain);
@@ -1151,8 +1174,9 @@ class DomainInfoFlowTest extends ResourceFlowTestCase<DomainInfoFlow, Domain> {
                 .setAllowedTlds(ImmutableSet.of("foo"))
                 .setAllowedRegistrarIds(ImmutableSet.of("NewRegistrar"))
                 .setRenewalPriceBehavior(RenewalPriceBehavior.SPECIFIED)
+                .setRenewalPrice(Money.of(USD, 0))
                 .setAllowedEppActions(ImmutableSet.of(CommandName.CREATE))
-                .setDiscountFraction(1)
+                .setDiscountFraction(1.0)
                 .build());
     domain = domain.asBuilder().setCurrentBulkToken(token.createVKey()).build();
     persistResource(domain);

@@ -1,0 +1,83 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: frontend
+spec:
+  selector:
+    matchLabels:
+      service: frontend
+  template:
+    metadata:
+      labels:
+        service: frontend
+    spec:
+      serviceAccountName: nomulus
+      containers:
+      - name: frontend
+        image: gcr.io/GCP_PROJECT/nomulus
+        ports:
+        - containerPort: 8080
+          name: http
+        resources:
+          requests:
+            cpu: "500m"
+        args: [ENVIRONMENT]
+        env:
+        - name: POD_ID
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.name
+        - name: JETTY_WORKER_INSTANCE
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.name
+        - name: NAMESPACE_ID
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.namespace
+        - name: CONTAINER_NAME
+          value: frontend
+---
+# Only need to define the service account once per cluster.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: nomulus
+  annotations:
+    iam.gke.io/gcp-service-account: "nomulus-service-account@GCP_PROJECT.iam.gserviceaccount.com"
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: frontend
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: frontend
+  minReplicas: 5
+  maxReplicas: 15
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 100
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: frontend
+spec:
+  selector:
+    service: frontend
+  ports:
+    - port: 80
+      targetPort: http
+      name: http
+---
+apiVersion: net.gke.io/v1
+kind: ServiceExport
+metadata:
+  name: frontend

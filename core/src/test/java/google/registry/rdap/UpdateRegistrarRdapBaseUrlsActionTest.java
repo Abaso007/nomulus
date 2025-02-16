@@ -18,20 +18,28 @@ import static com.google.common.truth.Truth.assertThat;
 import static google.registry.testing.DatabaseHelper.createTld;
 import static google.registry.testing.DatabaseHelper.loadRegistrar;
 import static google.registry.testing.DatabaseHelper.persistSimpleResource;
+import static jakarta.servlet.http.HttpServletResponse.SC_INTERNAL_SERVER_ERROR;
+import static jakarta.servlet.http.HttpServletResponse.SC_OK;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 
-import com.google.api.client.http.HttpResponseException;
-import com.google.api.client.http.HttpStatusCodes;
-import com.google.api.client.http.LowLevelHttpRequest;
-import com.google.api.client.testing.http.MockHttpTransport;
-import com.google.api.client.testing.http.MockLowLevelHttpRequest;
-import com.google.api.client.testing.http.MockLowLevelHttpResponse;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableSet;
 import google.registry.model.registrar.Registrar;
 import google.registry.model.registrar.RegistrarAddress;
+import google.registry.model.registrar.RegistrarBase;
 import google.registry.persistence.transaction.JpaTestExtensions;
 import google.registry.persistence.transaction.JpaTestExtensions.JpaIntegrationTestExtension;
+import google.registry.request.HttpException.InternalServerErrorException;
+import google.registry.testing.FakeUrlConnectionService;
+import google.registry.util.UrlConnectionException;
+import java.io.ByteArrayInputStream;
+import java.net.HttpURLConnection;
+import java.net.URL;
+import java.nio.charset.StandardCharsets;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.RegisterExtension;
@@ -41,68 +49,52 @@ public final class UpdateRegistrarRdapBaseUrlsActionTest {
 
   // This reply simulates part of the actual IANA CSV reply
   private static final String CSV_REPLY =
-      "\"ID\",Registrar Name,Status,RDAP Base URL\n"
-          + "1,Reserved,Reserved,\n"
-          + "81,Gandi SAS,Accredited,https://rdap.gandi.net/\n"
-          + "100,Whois Corp.,Accredited,https://www.yesnic.com/rdap/\n"
-          + "134,BB-Online UK Limited,Accredited,https://rdap.bb-online.com/\n"
-          + "1316,\"Xiamen 35.Com Technology Co., Ltd.\",Accredited,https://rdap.35.com/rdap/\n"
-          + "1448,Blacknight Internet Solutions Ltd.,Accredited,https://rdap.blacknight.com/\n"
-          + "1463,\"Global Domains International, Inc. DBA"
-          + " DomainCostClub.com\",Accredited,https://rdap.domaincostclub.com/\n"
-          + "1556,\"Chengdu West Dimension Digital Technology Co.,"
-          + " Ltd.\",Accredited,https://rdap.west.cn/rdap/\n"
-          + "2288,Metaregistrar BV,Accredited,https://rdap.metaregistrar.com/\n"
-          + "4000,Gname 031 Inc,Accredited,\n"
-          + "9999,Reserved for non-billable transactions where Registry Operator acts as"
-          + " Registrar,Reserved,\n";
+      """
+          "ID",Registrar Name,Status,RDAP Base URL
+          1,Reserved,Reserved,
+          81,Gandi SAS,Accredited,https://rdap.gandi.net/
+          100,Whois Corp.,Accredited,https://www.yesnic.com/rdap/
+          134,BB-Online UK Limited,Accredited,https://rdap.bb-online.com/
+          1316,"Xiamen 35.Com Technology Co., Ltd.",Accredited,https://rdap.35.com/rdap/
+          1448,Blacknight Internet Solutions Ltd.,Accredited,https://rdap.blacknight.com/
+          1463,"Global Domains International, Inc. DBA DomainCostClub.com",Accredited,\
+          https://rdap.domaincostclub.com/
+          1556,"Chengdu West Dimension Digital Technology Co., Ltd.",Accredited,\
+          https://rdap.west.cn/rdap/
+          2288,Metaregistrar BV,Accredited,https://rdap.metaregistrar.com/
+          4000,Gname 031 Inc,Accredited,
+          9999,Reserved for non-billable transactions where Registry Operator acts as\
+           Registrar,Reserved,
+          """;
 
   @RegisterExtension
   public JpaIntegrationTestExtension jpa =
       new JpaTestExtensions.Builder().buildIntegrationTestExtension();
 
-  private static class TestHttpTransport extends MockHttpTransport {
-    private MockLowLevelHttpRequest requestSent;
-    private MockLowLevelHttpResponse response;
-
-    void setResponse(MockLowLevelHttpResponse response) {
-      this.response = response;
-    }
-
-    MockLowLevelHttpRequest getRequestSent() {
-      return requestSent;
-    }
-
-    @Override
-    public LowLevelHttpRequest buildRequest(String method, String url) {
-      assertThat(method).isEqualTo("GET");
-      MockLowLevelHttpRequest httpRequest = new MockLowLevelHttpRequest(url);
-      httpRequest.setResponse(response);
-      requestSent = httpRequest;
-      return httpRequest;
-    }
-  }
-
-  private TestHttpTransport httpTransport;
+  private final HttpURLConnection connection = mock(HttpURLConnection.class);
+  private final FakeUrlConnectionService urlConnectionService =
+      new FakeUrlConnectionService(connection);
   private UpdateRegistrarRdapBaseUrlsAction action;
 
   @BeforeEach
-  void beforeEach() {
+  void beforeEach() throws Exception {
     action = new UpdateRegistrarRdapBaseUrlsAction();
-    httpTransport = new TestHttpTransport();
-    action.httpTransport = httpTransport;
-    setValidResponse();
+    action.urlConnectionService = urlConnectionService;
+    when(connection.getResponseCode()).thenReturn(SC_OK);
+    when(connection.getInputStream())
+        .thenReturn(new ByteArrayInputStream(CSV_REPLY.getBytes(StandardCharsets.UTF_8)));
     createTld("tld");
   }
 
-  private void assertCorrectRequestSent() {
-    assertThat(httpTransport.getRequestSent().getUrl())
-        .isEqualTo("https://www.iana.org/assignments/registrar-ids/registrar-ids-1.csv");
-    assertThat(httpTransport.getRequestSent().getHeaders().get("accept-encoding")).isNull();
+  private void assertCorrectRequestSent() throws Exception {
+    assertThat(urlConnectionService.getConnectedUrls())
+        .containsExactly(
+            new URL("https://www.iana.org/assignments/registrar-ids/registrar-ids-1.csv"));
+    verify(connection).setRequestProperty("Accept-Encoding", "gzip");
   }
 
   private static void persistRegistrar(
-      String registrarId, Long ianaId, Registrar.Type type, String... rdapBaseUrls) {
+      String registrarId, Long ianaId, RegistrarBase.Type type, String... rdapBaseUrls) {
     persistSimpleResource(
         new Registrar.Builder()
             .setRegistrarId(registrarId)
@@ -119,14 +111,8 @@ public final class UpdateRegistrarRdapBaseUrlsActionTest {
             .build());
   }
 
-  private void setValidResponse() {
-    MockLowLevelHttpResponse csvResponse = new MockLowLevelHttpResponse();
-    csvResponse.setContent(CSV_REPLY);
-    httpTransport.setResponse(csvResponse);
-  }
-
   @Test
-  void testUnknownIana_cleared() {
+  void testUnknownIana_cleared() throws Exception {
     // The IANA ID isn't in the CSV reply
     persistRegistrar("someRegistrar", 4123L, Registrar.Type.REAL, "http://rdap.example/blah");
     action.run();
@@ -135,7 +121,7 @@ public final class UpdateRegistrarRdapBaseUrlsActionTest {
   }
 
   @Test
-  void testKnownIana_changed() {
+  void testKnownIana_changed() throws Exception {
     // The IANA ID is in the CSV reply
     persistRegistrar("someRegistrar", 1448L, Registrar.Type.REAL, "http://rdap.example/blah");
     action.run();
@@ -145,7 +131,7 @@ public final class UpdateRegistrarRdapBaseUrlsActionTest {
   }
 
   @Test
-  void testKnownIana_notReal_noChange() {
+  void testKnownIana_notReal_noChange() throws Exception {
     // The IANA ID is in the CSV reply
     persistRegistrar("someRegistrar", 9999L, Registrar.Type.INTERNAL, "http://rdap.example/blah");
     // Real registrars should actually change
@@ -159,7 +145,7 @@ public final class UpdateRegistrarRdapBaseUrlsActionTest {
   }
 
   @Test
-  void testKnownIana_notReal_nullIANA_noChange() {
+  void testKnownIana_notReal_nullIANA_noChange() throws Exception {
     persistRegistrar("someRegistrar", null, Registrar.Type.TEST, "http://rdap.example/blah");
     action.run();
     assertCorrectRequestSent();
@@ -168,29 +154,30 @@ public final class UpdateRegistrarRdapBaseUrlsActionTest {
   }
 
   @Test
-  void testFailure_serverErrorResponse() {
-    MockLowLevelHttpResponse badResponse = new MockLowLevelHttpResponse();
-    badResponse.setZeroContent();
-    badResponse.setStatusCode(HttpStatusCodes.STATUS_CODE_SERVER_ERROR);
-    httpTransport.setResponse(badResponse);
-
-    RuntimeException thrown = assertThrows(RuntimeException.class, action::run);
+  void testFailure_serverErrorResponse() throws Exception {
+    when(connection.getResponseCode()).thenReturn(SC_INTERNAL_SERVER_ERROR);
+    when(connection.getInputStream())
+        .thenReturn(new ByteArrayInputStream("".getBytes(StandardCharsets.UTF_8)));
+    InternalServerErrorException thrown =
+        assertThrows(InternalServerErrorException.class, action::run);
+    verify(connection, times(0)).getInputStream();
     assertThat(thrown).hasMessageThat().isEqualTo("Error when retrieving RDAP base URL CSV file");
     Throwable cause = thrown.getCause();
-    assertThat(cause).isInstanceOf(HttpResponseException.class);
+    assertThat(cause).isInstanceOf(UrlConnectionException.class);
     assertThat(cause)
         .hasMessageThat()
-        .isEqualTo("500\nGET https://www.iana.org/assignments/registrar-ids/registrar-ids-1.csv");
+        .contains("https://www.iana.org/assignments/registrar-ids/registrar-ids-1.csv");
   }
 
   @Test
-  void testFailure_invalidCsv() {
-    MockLowLevelHttpResponse csvResponse = new MockLowLevelHttpResponse();
-    csvResponse.setContent("foo,bar\nbaz,foo");
-    httpTransport.setResponse(csvResponse);
+  void testFailure_invalidCsv() throws Exception {
+    when(connection.getInputStream())
+        .thenReturn(new ByteArrayInputStream("foo,bar\nbaz,foo".getBytes(StandardCharsets.UTF_8)));
 
-    IllegalArgumentException thrown = assertThrows(IllegalArgumentException.class, action::run);
+    InternalServerErrorException thrown =
+        assertThrows(InternalServerErrorException.class, action::run);
     assertThat(thrown)
+        .hasCauseThat()
         .hasMessageThat()
         .isEqualTo("Mapping for ID not found, expected one of [foo, bar]");
   }

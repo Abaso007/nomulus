@@ -14,12 +14,13 @@
 
 package google.registry.tools;
 
-import static com.google.common.truth.Truth8.assertThat;
+import static com.google.common.truth.Truth.assertThat;
 import static google.registry.persistence.transaction.TransactionManagerFactory.tm;
 import static google.registry.testing.DatabaseHelper.persistResource;
+import static org.joda.money.CurrencyUnit.USD;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
-import com.google.common.truth.Truth;
+import com.google.common.collect.ImmutableSet;
 import google.registry.model.billing.BillingBase.RenewalPriceBehavior;
 import google.registry.model.domain.fee.FeeQueryCommandExtensionItem.CommandName;
 import google.registry.model.domain.token.AllocationToken;
@@ -31,7 +32,6 @@ import org.joda.money.Money;
 import org.joda.time.DateTime;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.testcontainers.shaded.com.google.common.collect.ImmutableSet;
 
 /** Unit tests for {@link UpdateBulkPricingPackageCommand}. */
 public class UpdateBulkPricingPackageCommandTest
@@ -48,8 +48,9 @@ public class UpdateBulkPricingPackageCommandTest
                 .setAllowedTlds(ImmutableSet.of("foo"))
                 .setAllowedRegistrarIds(ImmutableSet.of("TheRegistrar"))
                 .setRenewalPriceBehavior(RenewalPriceBehavior.SPECIFIED)
+                .setRenewalPrice(Money.of(USD, 0))
                 .setAllowedEppActions(ImmutableSet.of(CommandName.CREATE))
-                .setDiscountFraction(1)
+                .setDiscountFraction(1.0)
                 .build());
     BulkPricingPackage bulkPricingPackage =
         new BulkPricingPackage.Builder()
@@ -69,7 +70,7 @@ public class UpdateBulkPricingPackageCommandTest
         "--max_domains=200",
         "--max_creates=1000",
         "--price=USD 2000.00",
-        "--next_billing_date=2013-03-17",
+        "--next_billing_date=2013-03-17T00:00:00Z",
         "--clear_last_notification_sent",
         "abc123");
 
@@ -77,10 +78,10 @@ public class UpdateBulkPricingPackageCommandTest
         tm().transact(() -> BulkPricingPackage.loadByTokenString("abc123"));
     assertThat(bulkPricingPackageOptional).isPresent();
     BulkPricingPackage bulkPricingPackage = bulkPricingPackageOptional.get();
-    Truth.assertThat(bulkPricingPackage.getMaxDomains()).isEqualTo(200);
-    Truth.assertThat(bulkPricingPackage.getMaxCreates()).isEqualTo(1000);
-    Truth.assertThat(bulkPricingPackage.getBulkPrice()).isEqualTo(Money.of(CurrencyUnit.USD, 2000));
-    Truth.assertThat(bulkPricingPackage.getNextBillingDate())
+    assertThat(bulkPricingPackage.getMaxDomains()).isEqualTo(200);
+    assertThat(bulkPricingPackage.getMaxCreates()).isEqualTo(1000);
+    assertThat(bulkPricingPackage.getBulkPrice()).isEqualTo(Money.of(CurrencyUnit.USD, 2000));
+    assertThat(bulkPricingPackage.getNextBillingDate())
         .isEqualTo(DateTime.parse("2013-03-17T00:00:00Z"));
     assertThat(bulkPricingPackage.getLastNotificationSent()).isEmpty();
   }
@@ -95,8 +96,9 @@ public class UpdateBulkPricingPackageCommandTest
             .setAllowedTlds(ImmutableSet.of("foo"))
             .setAllowedRegistrarIds(ImmutableSet.of("TheRegistrar"))
             .setRenewalPriceBehavior(RenewalPriceBehavior.SPECIFIED)
+            .setRenewalPrice(Money.of(USD, 0))
             .setAllowedEppActions(ImmutableSet.of(CommandName.CREATE))
-            .setDiscountFraction(1)
+            .setDiscountFraction(1.0)
             .build());
     IllegalArgumentException thrown =
         assertThrows(
@@ -106,9 +108,9 @@ public class UpdateBulkPricingPackageCommandTest
                     "--max_domains=100",
                     "--max_creates=500",
                     "--price=USD 1000.00",
-                    "--next_billing_date=2012-03-17",
+                    "--next_billing_date=2012-03-17T00:00:00Z",
                     "nullPackage"));
-    Truth.assertThat(thrown.getMessage())
+    assertThat(thrown.getMessage())
         .isEqualTo("BulkPricingPackage with token nullPackage does not exist");
   }
 
@@ -117,7 +119,7 @@ public class UpdateBulkPricingPackageCommandTest
     runCommandForced(
         "--max_creates=1000",
         "--price=USD 2000.00",
-        "--next_billing_date=2013-03-17",
+        "--next_billing_date=2013-03-17T00:00:00Z",
         "--clear_last_notification_sent",
         "abc123");
 
@@ -125,10 +127,10 @@ public class UpdateBulkPricingPackageCommandTest
         tm().transact(() -> BulkPricingPackage.loadByTokenString("abc123"));
     assertThat(bulkPricingPackageOptional).isPresent();
     BulkPricingPackage bulkPricingPackage = bulkPricingPackageOptional.get();
-    Truth.assertThat(bulkPricingPackage.getMaxDomains()).isEqualTo(100);
-    Truth.assertThat(bulkPricingPackage.getMaxCreates()).isEqualTo(1000);
-    Truth.assertThat(bulkPricingPackage.getBulkPrice()).isEqualTo(Money.of(CurrencyUnit.USD, 2000));
-    Truth.assertThat(bulkPricingPackage.getNextBillingDate())
+    assertThat(bulkPricingPackage.getMaxDomains()).isEqualTo(100);
+    assertThat(bulkPricingPackage.getMaxCreates()).isEqualTo(1000);
+    assertThat(bulkPricingPackage.getBulkPrice()).isEqualTo(Money.of(CurrencyUnit.USD, 2000));
+    assertThat(bulkPricingPackage.getNextBillingDate())
         .isEqualTo(DateTime.parse("2013-03-17T00:00:00Z"));
     assertThat(bulkPricingPackage.getLastNotificationSent()).isEmpty();
   }
@@ -146,10 +148,10 @@ public class UpdateBulkPricingPackageCommandTest
         tm().transact(() -> BulkPricingPackage.loadByTokenString("abc123"));
     assertThat(bulkPricingPackageOptional).isPresent();
     BulkPricingPackage bulkPricingPackage = bulkPricingPackageOptional.get();
-    Truth.assertThat(bulkPricingPackage.getMaxDomains()).isEqualTo(200);
-    Truth.assertThat(bulkPricingPackage.getMaxCreates()).isEqualTo(1000);
-    Truth.assertThat(bulkPricingPackage.getBulkPrice()).isEqualTo(Money.of(CurrencyUnit.USD, 2000));
-    Truth.assertThat(bulkPricingPackage.getNextBillingDate())
+    assertThat(bulkPricingPackage.getMaxDomains()).isEqualTo(200);
+    assertThat(bulkPricingPackage.getMaxCreates()).isEqualTo(1000);
+    assertThat(bulkPricingPackage.getBulkPrice()).isEqualTo(Money.of(CurrencyUnit.USD, 2000));
+    assertThat(bulkPricingPackage.getNextBillingDate())
         .isEqualTo(DateTime.parse("2012-11-12T05:00:00Z"));
     assertThat(bulkPricingPackage.getLastNotificationSent()).isEmpty();
   }
@@ -159,7 +161,7 @@ public class UpdateBulkPricingPackageCommandTest
     runCommandForced(
         "--max_domains=200",
         "--max_creates=1000",
-        "--next_billing_date=2013-03-17",
+        "--next_billing_date=2013-03-17T00:00:00Z",
         "--clear_last_notification_sent",
         "abc123");
 
@@ -167,10 +169,10 @@ public class UpdateBulkPricingPackageCommandTest
         tm().transact(() -> BulkPricingPackage.loadByTokenString("abc123"));
     assertThat(bulkPricingPackageOptional).isPresent();
     BulkPricingPackage bulkPricingPackage = bulkPricingPackageOptional.get();
-    Truth.assertThat(bulkPricingPackage.getMaxDomains()).isEqualTo(200);
-    Truth.assertThat(bulkPricingPackage.getMaxCreates()).isEqualTo(1000);
-    Truth.assertThat(bulkPricingPackage.getBulkPrice()).isEqualTo(Money.of(CurrencyUnit.USD, 1000));
-    Truth.assertThat(bulkPricingPackage.getNextBillingDate())
+    assertThat(bulkPricingPackage.getMaxDomains()).isEqualTo(200);
+    assertThat(bulkPricingPackage.getMaxCreates()).isEqualTo(1000);
+    assertThat(bulkPricingPackage.getBulkPrice()).isEqualTo(Money.of(CurrencyUnit.USD, 1000));
+    assertThat(bulkPricingPackage.getNextBillingDate())
         .isEqualTo(DateTime.parse("2013-03-17T00:00:00Z"));
     assertThat(bulkPricingPackage.getLastNotificationSent()).isEmpty();
   }
@@ -183,12 +185,12 @@ public class UpdateBulkPricingPackageCommandTest
         tm().transact(() -> BulkPricingPackage.loadByTokenString("abc123"));
     assertThat(bulkPricingPackageOptional).isPresent();
     BulkPricingPackage bulkPricingPackage = bulkPricingPackageOptional.get();
-    Truth.assertThat(bulkPricingPackage.getMaxDomains()).isEqualTo(200);
-    Truth.assertThat(bulkPricingPackage.getMaxCreates()).isEqualTo(1000);
-    Truth.assertThat(bulkPricingPackage.getBulkPrice()).isEqualTo(Money.of(CurrencyUnit.USD, 2000));
-    Truth.assertThat(bulkPricingPackage.getNextBillingDate())
+    assertThat(bulkPricingPackage.getMaxDomains()).isEqualTo(200);
+    assertThat(bulkPricingPackage.getMaxCreates()).isEqualTo(1000);
+    assertThat(bulkPricingPackage.getBulkPrice()).isEqualTo(Money.of(CurrencyUnit.USD, 2000));
+    assertThat(bulkPricingPackage.getNextBillingDate())
         .isEqualTo(DateTime.parse("2012-11-12T05:00:00Z"));
-    Truth.assertThat(bulkPricingPackage.getLastNotificationSent().get())
+    assertThat(bulkPricingPackage.getLastNotificationSent().get())
         .isEqualTo(DateTime.parse("2010-11-12T05:00:00.000Z"));
   }
 }

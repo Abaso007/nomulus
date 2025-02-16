@@ -53,6 +53,7 @@ abstract class CreateOrUpdateReservedListCommandTestCase<
         .write("sdfgagmsdgs,sdfgsd\nasdf234tafgs,asdfaw\n\n");
     reservedTermsPath = reservedTermsFile.getPath();
     invalidReservedTermsPath = invalidReservedTermsFile.getPath();
+    command.printStream = System.out;
   }
 
   @Test
@@ -64,7 +65,7 @@ abstract class CreateOrUpdateReservedListCommandTestCase<
                 runCommandForced(
                     "--name=xn--q9jyb4c_common-reserved",
                     "--input=" + reservedTermsPath + "-nonexistent"));
-    assertThat(thrown).hasMessageThat().contains("-i not found");
+    assertThat(thrown).hasMessageThat().contains("--input not found");
   }
 
   @Test
@@ -96,12 +97,10 @@ abstract class CreateOrUpdateReservedListCommandTestCase<
   ReservedList createCloudSqlReservedList(
       String name,
       DateTime creationTime,
-      boolean shouldPublish,
       ImmutableMap<String, ReservedListEntry> labelsToEntries) {
     return new ReservedList.Builder()
         .setName(name)
         .setCreationTimestamp(creationTime)
-        .setShouldPublish(shouldPublish)
         .setReservedListMap(labelsToEntries)
         .build();
   }

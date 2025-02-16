@@ -29,21 +29,20 @@ buildscript {
 
   dependencies {
     classpath 'com.google.cloud.tools:appengine-gradle-plugin:2.4.1'
-    classpath 'net.ltgt.gradle:gradle-errorprone-plugin:2.0.2'
+    classpath 'net.ltgt.gradle:gradle-errorprone-plugin:3.1.0'
     classpath 'org.sonatype.aether:aether-api:1.13.1'
     classpath 'org.sonatype.aether:aether-impl:1.13.1'
   }
 }
 
 plugins {
-  // Java static analysis plugins. Keep versions consistent with
-  // ./buildSrc/build.gradle.kts
+  // Java static analysis plugins.
 
   // Re-enable when compatible with Gradle 8
   // id 'nebula.lint' version '16.0.2'
-  id 'net.ltgt.errorprone' version '2.0.2'
+  id 'net.ltgt.errorprone' version '3.1.0'
   id 'checkstyle'
-  id 'com.github.johnrengelman.shadow' version '5.1.0'
+  id 'com.github.johnrengelman.shadow' version '8.1.1'
 
   // NodeJs plugin
   id "com.github.node-gradle.node" version "3.0.1"
@@ -60,36 +59,12 @@ dependencyLocking {
 }
 
 node {
-  download = true
-  version = "16.14.0"
-  npmVersion = "6.14.11"
+  download = false
+  version = "22.7.0"
 }
 
 wrapper {
   distributionType = Wrapper.DistributionType.ALL
-}
-
-apply plugin: google.registry.gradle.plugin.ReportUploaderPlugin
-
-reportUploader {
-  // Set the location where we want to upload the build results.
-  // e.g. -P uploaderDestination=gcs://domain-registry-alpha-build-result-test
-  //
-  // If not set - the upload will be skipped
-  destination = uploaderDestination
-
-  // The location of the file containing the OAuth2 Google Cloud credentials.
-  //
-  // The file can contain a Service Account key file in JSON format from the
-  // Google Developers Console or a stored user credential using the format
-  // supported by the Cloud SDK.
-  //
-  // If no file is given - the default credentials are used.
-  credentialsFile = uploaderCredentialsFile
-
-  // If set to 'yes', each file will be uploaded to GCS in a separate thread.
-  // This is MUCH faster.
-  multithreadedUpload = uploaderMultithreadedUpload
 }
 
 apply from: 'dependencies.gradle'
@@ -98,15 +73,6 @@ apply from: 'dependency_lic.gradle'
 
 apply from: 'utils.gradle'
 
-// Custom task to run checkLicense in buildSrc, which is not triggered
-// by root project tasks. A shell task is used because buildSrc tasks
-// cannot be referenced in the same way as tasks from a regular included
-// build.
-task checkBuildSrcLicense(type:Exec) {
-  workingDir "${rootDir}/buildSrc"
-  commandLine '../gradlew', 'checkLicense'
-}
-tasks.checkLicense.dependsOn(tasks.checkBuildSrcLicense)
 tasks.build.dependsOn(tasks.checkLicense)
 
 // Provide defaults for all of the project properties.
@@ -153,6 +119,7 @@ if (environment == '') {
 
 rootProject.ext.environment = environment
 rootProject.ext.gcpProject = gcpProject
+rootProject.ext.baseDomain = baseDomains[environment]
 rootProject.ext.prodOrSandboxEnv = environment in ['production', 'sandbox']
 
 // Function to verify that the deployment parameters have been set.
@@ -212,6 +179,30 @@ allprojects {
         options.fork = true
         options.forkOptions.executable =
           file("${System.env.JAVA_HOME}/bin/javac")
+        options.compilerArgs = ["--add-exports",
+                                "jdk.compiler/com.sun.tools.javac.main=ALL-UNNAMED",
+                                "--add-exports",
+                                "jdk.compiler/com.sun.tools.javac.comp=ALL-UNNAMED",
+                                "--add-exports",
+                                "jdk.compiler/com.sun.tools.javac.util=ALL-UNNAMED",
+                                "--add-exports",
+                                "jdk.compiler/com.sun.tools.javac.tree=ALL-UNNAMED",
+                                "--add-exports",
+                                "jdk.compiler/com.sun.tools.javac.code=ALL-UNNAMED",
+                                "--add-exports",
+                                "jdk.compiler/com.sun.tools.javac.processing=ALL-UNNAMED",
+                                "--add-exports",
+                                "jdk.compiler/com.sun.tools.javac.parser=ALL-UNNAMED",
+                                "--add-exports",
+                                "jdk.compiler/com.sun.tools.javac.api=ALL-UNNAMED"]
+        options.forkOptions.jvmArgs = ["-J--add-exports=jdk.compiler/com.sun.tools.javac.main=ALL-UNNAMED",
+                                       "-J--add-exports=jdk.compiler/com.sun.tools.javac.util=ALL-UNNAMED",
+                                       "-J--add-exports=jdk.compiler/com.sun.tools.javac.comp=ALL-UNNAMED",
+                                       "-J--add-exports=jdk.compiler/com.sun.tools.javac.tree=ALL-UNNAMED",
+                                       "-J--add-exports=jdk.compiler/com.sun.tools.javac.code=ALL-UNNAMED",
+                                       "-J--add-exports=jdk.compiler/com.sun.tools.javac.processing=ALL-UNNAMED",
+                                       "-J--add-exports=jdk.compiler/com.sun.tools.javac.parser=ALL-UNNAMED",
+                                       "-J--add-exports=jdk.compiler/com.sun.tools.javac.api=ALL-UNNAMED"]
       }
     }
   }
@@ -258,6 +249,12 @@ def javadocSource = []
 def javadocClasspath = []
 def javadocDependentTasks = []
 
+def services = [':services:default',
+                ':services:backend',
+                ':services:bsa',
+                ':services:tools',
+                ':services:pubapi']
+
 subprojects {
   // Skip no-op project
   if (project.name == 'services') return
@@ -277,6 +274,11 @@ subprojects {
         manifest {
           attributes 'Main-Class': mainClass
         }
+      }
+      // Build as a multi-release jar since we've got member jars (e.g., dnsjava
+      // and snakeyaml) that are multi-release.
+      manifest {
+        attributes 'Multi-Release': true
       }
       zip64 = true
       archiveClassifier = ''
@@ -308,17 +310,13 @@ subprojects {
 
   afterEvaluate {
     if (rootProject.enableDependencyLocking.toBoolean()
-        && project.name != 'integration'
-        && project.name != 'java8compatibility') {
+        && project.name != 'integration') {
       // The ':integration' project runs server/schema integration tests using
       // dynamically specified jars with no transitive dependency. Therefore
       // dependency-locking does not make sense. Furthermore, during
       // evaluation it resolves the 'testRuntimeOnly' configuration, making it
       // immutable. Locking activation would trigger an invalid operation
       // exception.
-      //
-      // The ':java8compatibility' project is test-only. Its source does not go
-      // into production.
       //
       // For all other projects, due to problem with the gradle-license-report
       // plugin, the dependencyLicenseReport configuration must opt out of
@@ -335,22 +333,6 @@ subprojects {
     }
   }
 
-  // 'listenablefuture' is folded into guava since v32. This block is required
-  // until all transitive dependencies have upgraded past guava v32.
-  // TODO(periodically): remove this block and see if build succeeds.
-  configurations.all {
-    resolutionStrategy
-            .capabilitiesResolution
-            .withCapability("com.google.guava:listenablefuture") {
-      select("com.google.guava:guava:0")
-    }
-  }
-
-  def services = [':services:default',
-                  ':services:backend',
-                  ':services:tools',
-                  ':services:pubapi']
-
   // Set up all of the deployment projects.
   if (services.contains(project.path)) {
 
@@ -362,12 +344,12 @@ subprojects {
 
   apply from: "${rootDir.path}/java_common.gradle"
 
-  if (project.name != 'docs') {
-    compileJava {
-      // TODO: Remove this once we migrate off AppEngine.
-      options.release = 8
-    }
-  }
+  // When changing Java version here, be sure to update BEAM Java runtime:
+  // search for `flex-template-base-image` and update the parameter value.
+  // There are at least two instances, one in core/build.gradle, one in
+  // release/stage_beam_pipeline.sh
+  sourceCompatibility = JavaVersion.VERSION_21
+  targetCompatibility = JavaVersion.VERSION_21
 
   project.tasks.test.dependsOn runPresubmits
 
@@ -392,14 +374,25 @@ subprojects {
     }
   }
 
-  // No need to produce javadoc for the docs subproject, which has no APIs to
+  // No need to produce javadoc for the jetty subproject, which has no APIs to
   // expose to users.
-  if (project.name != 'docs') {
+  if (project.name != 'jetty') {
     javadocSource << project.sourceSets.main.allJava
     javadocClasspath << project.sourceSets.main.runtimeClasspath
     javadocClasspath << "${buildDir}/generated/sources/annotationProcessor/java/main"
     javadocDependentTasks << project.tasks.compileJava
   }
+}
+
+// Force SDK download and deployment to be sequential, otherwise parallel tasks
+// will fail. For SDK download, they will try to write to the same location to
+// upgrade gcloud. For deployment, they will try to deploy different services to
+// the same project at the same time.
+for (int i = 1; i < services.size(); i++) {
+  project("${services[i]}").downloadCloudSdk
+          .dependsOn(project("${services[i - 1]}").downloadCloudSdk)
+  project("${services[i]}").appengineDeployAll
+          .dependsOn(project("${services[i - 1]}").appengineDeployAll)
 }
 
 // If "-P verboseTestOutput=true" is passed in, configure all subprojects to dump all of their
@@ -432,9 +425,6 @@ if (verboseTestOutput.toBoolean()) {
 }
 
 task checkDependenciesDotGradle {
-  def buildSrcDepsFile = File.createTempFile('buildSrc', 'deps')
-  buildSrcDepsFile.deleteOnExit()
-  dependsOn createGetBuildSrcDirectDepsTask(buildSrcDepsFile)
 
   doLast {
     Set<String> depsInUse = []
@@ -447,9 +437,7 @@ task checkDependenciesDotGradle {
         }
       }
     }
-    if (buildSrcDepsFile.exists()) {
-      depsInUse.addAll(buildSrcDepsFile.readLines())
-    }
+
     def unusedDeps =
         rootProject.dependencyMap.keySet()
             .findAll { !depsInUse.contains(it) }
@@ -466,34 +454,23 @@ task checkDependenciesDotGradle {
 }
 tasks.build.dependsOn(tasks.checkDependenciesDotGradle)
 
-def createGetBuildSrcDirectDepsTask(outputFileName) {
-  return tasks
-      .create(
-          "getBuildSrcDeps_${java.util.UUID.randomUUID()}".toString(),
-          Exec) {
-    workingDir "${rootDir}/buildSrc"
-    commandLine '../gradlew', 'exportDependencies',
-                "-PdependencyExportFile=${outputFileName}"
-  }
-}
-
 rootProject.ext {
   invokeJavaDiffFormatScript = { action ->
-    println("JAVA_HOME=${System.env.JAVA_HOME}")
-    println("PATH=${System.env.PATH}")
-    println(ext.execInBash("type java", "${rootDir}"))
-    println(ext.execInBash("java -version", "${rootDir}"))
-    def scriptDir = rootDir.path.endsWith('buildSrc')
-            ? "${rootDir}/../java-format"
-            : "${rootDir}/java-format"
-    def workingDir = rootDir.path.endsWith('buildSrc')
-            ? "${rootDir}/.."
-            : rootDir
+    def javaHome = project.findProperty('org.gradle.java.home')
+    def javaBin
+    if (javaHome != null) {
+      javaBin = "$javaHome/bin/java"
+    } else {
+      javaBin = ext.execInBash("which java", rootDir)
+    }
+    println("Running the formatting tool with $javaBin")
+    def scriptDir = "${rootDir}/java-format"
+    def workingDir = rootDir
     def formatDiffScript = "${scriptDir}/google-java-format-git-diff.sh"
     def pythonExe = getPythonExecutable()
 
     return ext.execInBash(
-        "PYTHON=${pythonExe} ${formatDiffScript} ${action}", "${workingDir}")
+        "JAVA=${javaBin} PYTHON=${pythonExe} ${formatDiffScript} ${action}", "${workingDir}")
   }
 }
 
@@ -548,7 +525,9 @@ task javadoc(type: Javadoc) {
   destinationDir = file("${buildDir}/docs/javadoc")
   options.encoding = "UTF-8"
   // In a lot of places we don't write @return so suppress warnings about that.
-  options.addBooleanOption('Xdoclint:all,-missing', true)
+  // We don't report HTML lint errors because XJB-generated POJO files have
+  // incorrect tags (like dangling </p> without the corresponding open tag.
+  options.addBooleanOption('Xdoclint:all,-missing,-html', true)
   options.addBooleanOption("-allow-script-in-comments",true)
   options.tags = ["type:a:Generic Type",
                   "error:a:Expected Error",
@@ -566,7 +545,6 @@ task coreDev {
   dependsOn 'javadoc'
   dependsOn 'checkDependenciesDotGradle'
   dependsOn 'checkLicense'
-  dependsOn ':console-webapp:runConsoleWebappUnitTests'
   dependsOn ':core:check'
   dependsOn 'assemble'
 }
@@ -583,7 +561,7 @@ task deployCloudSchedulerAndQueue {
         commandLine 'go', 'run',
                 "./deployCloudSchedulerAndQueue.go",
                 "${rootDir}/core/src/main/java/google/registry/config/files/nomulus-config-${env}.yaml",
-                "${rootDir}/core/src/main/java/google/registry/env/${env}/default/WEB-INF/cloud-scheduler-tasks.xml",
+                "${rootDir}/core/src/main/java/google/registry/config/files/tasks/cloud-scheduler-tasks-${env}.xml",
                 "domain-registry-${env}"
       }
       exec {
@@ -591,7 +569,7 @@ task deployCloudSchedulerAndQueue {
         commandLine 'go', 'run',
                 "./deployCloudSchedulerAndQueue.go",
                 "${rootDir}/core/src/main/java/google/registry/config/files/nomulus-config-${env}.yaml",
-                "${rootDir}/core/src/main/java/google/registry/env/common/default/WEB-INF/cloud-tasks-queue.xml",
+                "${rootDir}/core/src/main/java/google/registry/config/files/cloud-tasks-queue.xml",
                 "domain-registry-${env}"
       }
     }

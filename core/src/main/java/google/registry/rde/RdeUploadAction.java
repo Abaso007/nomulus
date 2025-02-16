@@ -50,7 +50,7 @@ import google.registry.model.tld.Tld;
 import google.registry.rde.EscrowTaskRunner.EscrowTask;
 import google.registry.rde.JSchSshSession.JSchSshSessionFactory;
 import google.registry.request.Action;
-import google.registry.request.Action.Service;
+import google.registry.request.Action.GaeService;
 import google.registry.request.HttpException.NoContentException;
 import google.registry.request.Parameter;
 import google.registry.request.RequestParameters;
@@ -84,10 +84,10 @@ import org.joda.time.Duration;
  * RdeReportAction}.
  */
 @Action(
-    service = Action.Service.BACKEND,
+    service = GaeService.BACKEND,
     path = RdeUploadAction.PATH,
     method = POST,
-    auth = Auth.AUTH_API_ADMIN)
+    auth = Auth.AUTH_ADMIN)
 public final class RdeUploadAction implements Runnable, EscrowTask {
 
   public static final String PATH = "/_dr/task/rdeUpload";
@@ -130,15 +130,14 @@ public final class RdeUploadAction implements Runnable, EscrowTask {
     params.put(RequestParameters.PARAM_TLD, tld);
     prefix.ifPresent(s -> params.put(RdeModule.PARAM_PREFIX, s));
     cloudTasksUtils.enqueue(
-        RDE_REPORT_QUEUE,
-        cloudTasksUtils.createPostTask(RdeReportAction.PATH, Service.BACKEND, params));
+        RDE_REPORT_QUEUE, cloudTasksUtils.createTask(RdeReportAction.class, POST, params));
   }
 
   @Override
   public void runWithLock(final DateTime watermark) throws Exception {
     // If a prefix is not provided,try to determine the prefix. This should only happen when the RDE
     // upload cron job runs to catch up any un-retried (i. e. expected) RDE failures.
-    if (!prefix.isPresent()) {
+    if (prefix.isEmpty()) {
       prefix = Optional.of(findMostRecentPrefixForWatermark(watermark, bucket, tld, gcsUtils));
     }
     logger.atInfo().log("Verifying readiness to upload the RDE deposit.");

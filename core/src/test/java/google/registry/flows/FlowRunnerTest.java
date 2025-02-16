@@ -16,7 +16,6 @@ package google.registry.flows;
 
 import static com.google.common.truth.Truth.assertThat;
 import static com.google.common.truth.Truth.assertWithMessage;
-import static com.google.common.truth.Truth8.assertThat;
 import static google.registry.persistence.transaction.TransactionManagerFactory.tm;
 import static google.registry.testing.TestDataHelper.loadFile;
 import static google.registry.testing.TestLogHandlerUtils.findFirstLogMessageByPrefix;
@@ -30,8 +29,8 @@ import com.google.common.base.Joiner;
 import com.google.common.base.Splitter;
 import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.ImmutableSortedMap;
+import com.google.common.net.InetAddresses;
 import com.google.common.testing.TestLogHandler;
-import google.registry.config.RegistryConfig;
 import google.registry.flows.certs.CertificateChecker;
 import google.registry.model.eppcommon.Trid;
 import google.registry.model.eppoutput.EppOutput.ResponseOrGreeting;
@@ -89,8 +88,8 @@ class FlowRunnerTest {
 
     @Override
     public ResponseOrGreeting run() {
-      tm().assertTransactionIsolationLevel(
-              isolationLevel.orElse(tm().getDefaultTransactionIsolationLevel()));
+      assertThat(tm().getCurrentTransactionIsolationLevel())
+          .isEqualTo(isolationLevel.orElse(tm().getDefaultTransactionIsolationLevel()));
       return mock(EppResponse.class);
     }
   }
@@ -112,6 +111,7 @@ class FlowRunnerTest {
         new StatelessRequestSessionMetadata("TheRegistrar", ImmutableSet.of());
     flowRunner.trid = Trid.create("client-123", "server-456");
     flowRunner.flowReporter = mock(FlowReporter.class);
+    flowRunner.jpaTransactionManager = tm();
   }
 
   @Test
@@ -136,10 +136,8 @@ class FlowRunnerTest {
         Optional.of(TransactionIsolationLevel.TRANSACTION_READ_UNCOMMITTED);
     flowRunner.flowClass = TestTransactionalFlow.class;
     flowRunner.flowProvider = () -> new TestTransactionalFlow(flowRunner.isolationLevelOverride);
-    if (RegistryConfig.getHibernatePerTransactionIsolationEnabled()) {
-      flowRunner.run(eppMetricBuilder);
-      assertThat(eppMetricBuilder.build().getCommandName()).hasValue("TestTransactional");
-    }
+    flowRunner.run(eppMetricBuilder);
+    assertThat(eppMetricBuilder.build().getCommandName()).hasValue("TestTransactional");
   }
 
   @Test
@@ -189,7 +187,10 @@ class FlowRunnerTest {
   void testRun_loggingStatement_tlsCredentials() throws Exception {
     flowRunner.credentials =
         new TlsCredentials(
-            true, Optional.of("abc123def"), Optional.of("127.0.0.1"), certificateChecker);
+            true,
+            Optional.of("abc123def"),
+            Optional.of(InetAddresses.forString("127.0.0.1")),
+            certificateChecker);
     flowRunner.run(eppMetricBuilder);
     assertThat(Splitter.on("\n\t").split(findFirstLogMessageByPrefix(handler, "EPP Command\n\t")))
         .contains("TlsCredentials{clientCertificateHash=abc123def," + " clientAddress=/127.0.0.1}");

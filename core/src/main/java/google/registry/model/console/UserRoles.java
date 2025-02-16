@@ -18,13 +18,18 @@ import static com.google.common.base.Preconditions.checkArgument;
 import static google.registry.util.PreconditionsUtils.checkArgumentNotNull;
 
 import com.google.common.collect.ImmutableMap;
+import com.google.gson.annotations.Expose;
 import google.registry.model.Buildable;
 import google.registry.model.ImmutableObject;
+import google.registry.persistence.converter.RegistrarToRoleMapUserType;
+import jakarta.persistence.Access;
+import jakarta.persistence.AccessType;
+import jakarta.persistence.Column;
+import jakarta.persistence.Embeddable;
+import jakarta.persistence.EnumType;
+import jakarta.persistence.Enumerated;
 import java.util.Map;
-import javax.persistence.Column;
-import javax.persistence.Embeddable;
-import javax.persistence.EnumType;
-import javax.persistence.Enumerated;
+import org.hibernate.annotations.Type;
 
 /**
  * Contains the global and per-registrar roles for a given user.
@@ -32,6 +37,7 @@ import javax.persistence.Enumerated;
  * <p>See <a href="https://go/nomulus-console-authz">go/nomulus-console-authz</a> for more
  * information.
  */
+@Access(AccessType.FIELD)
 @Embeddable
 public class UserRoles extends ImmutableObject implements Buildable {
 
@@ -48,6 +54,8 @@ public class UserRoles extends ImmutableObject implements Buildable {
   private GlobalRole globalRole = GlobalRole.NONE;
 
   /** Any per-registrar roles that this user may have. */
+  @Expose
+  @Type(RegistrarToRoleMapUserType.class)
   private Map<String, RegistrarRole> registrarRoles = ImmutableMap.of();
 
   /** Whether the user is a global admin, who has access to everything. */

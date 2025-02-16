@@ -31,6 +31,8 @@ import io.netty.channel.ChannelFuture;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.handler.codec.http.HttpResponseStatus;
 import java.net.MalformedURLException;
+import java.net.URI;
+import java.net.URISyntaxException;
 import java.net.URL;
 import javax.inject.Inject;
 import org.joda.time.Duration;
@@ -46,7 +48,7 @@ public class WebWhoisActionHandler extends ActionHandler {
 
   private static final FluentLogger logger = FluentLogger.forEnclosingClass();
 
-  /** Dagger injected components necessary for redirect responses: */
+  /* Dagger injected components necessary for redirect responses: */
 
   /** {@link Bootstrap} necessary for remaking connection on redirect response. */
   private final Bootstrap bootstrap;
@@ -87,7 +89,7 @@ public class WebWhoisActionHandler extends ActionHandler {
 
     if (response.status().equals(HttpResponseStatus.OK)) {
       logger.atInfo().log("Received Successful HttpResponseStatus");
-      logger.atInfo().log("Response Received: " + response);
+      logger.atInfo().log("Response Received: %s", response);
 
       // On success, we always pass message to ActionHandler's channelRead0 method.
       super.channelRead0(ctx, msg);
@@ -99,8 +101,8 @@ public class WebWhoisActionHandler extends ActionHandler {
       // Obtain url to be redirected to
       URL url;
       try {
-        url = new URL(response.headers().get("Location"));
-      } catch (MalformedURLException e) {
+        url = new URI(response.headers().get("Location")).toURL();
+      } catch (MalformedURLException | URISyntaxException | IllegalArgumentException e) {
         // in case of error, log it, and let ActionHandler's exceptionThrown method deal with it
         throw new FailureException(
             "Redirected Location was invalid. Given Location was: "

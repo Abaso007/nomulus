@@ -14,11 +14,15 @@
 
 package google.registry.request;
 
+import static com.google.common.base.Preconditions.checkState;
+
+import google.registry.config.RegistryConfig;
 import google.registry.request.auth.Auth;
 import java.lang.annotation.ElementType;
 import java.lang.annotation.Retention;
 import java.lang.annotation.RetentionPolicy;
 import java.lang.annotation.Target;
+import java.net.URL;
 
 /** Annotation for {@link Runnable} actions accepting HTTP requests from {@link RequestHandler}. */
 @Retention(RetentionPolicy.RUNTIME)
@@ -26,10 +30,22 @@ import java.lang.annotation.Target;
 public @interface Action {
 
   /** HTTP methods recognized by the request processor. */
-  enum Method { GET, HEAD, POST }
+  enum Method {
+    GET,
+    HEAD,
+    POST,
+    PUT,
+    DELETE
+  }
 
-  /** App Engine services supported by the request processor. */
-  enum Service {
+  interface Service {
+    String getServiceId();
+
+    URL getServiceUrl();
+  }
+
+  enum GaeService implements Service {
+    BSA("bsa"),
     DEFAULT("default"),
     TOOLS("tools"),
     BACKEND("backend"),
@@ -37,18 +53,59 @@ public @interface Action {
 
     private final String serviceId;
 
-    Service(String serviceId) {
+    GaeService(String serviceId) {
       this.serviceId = serviceId;
     }
 
-    /** Returns the actual service id in App Engine. */
+    @Override
     public String getServiceId() {
       return serviceId;
+    }
+
+    @Override
+    public URL getServiceUrl() {
+      return switch (this) {
+        case DEFAULT -> RegistryConfig.getDefaultServer();
+        case TOOLS -> RegistryConfig.getToolsServer();
+        case BACKEND -> RegistryConfig.getBackendServer();
+        case BSA -> RegistryConfig.getBsaServer();
+        case PUBAPI -> RegistryConfig.getPubapiServer();
+      };
+    }
+  }
+
+  enum GkeService implements Service {
+    // This designation means that it defers to the GAE service, so we don't have to annotate EVERY
+    // action during the GKE migration.
+    SAME_AS_GAE("same_as_gae"),
+    FRONTEND("frontend"),
+    BACKEND("backend"),
+    PUBAPI("pubapi"),
+    CONSOLE("console");
+
+    private final String serviceId;
+
+    GkeService(String serviceId) {
+      this.serviceId = serviceId;
+    }
+
+    @Override
+    public String getServiceId() {
+      checkState(this != SAME_AS_GAE, "Cannot get service Id for SAME_AS_GAE");
+      return serviceId;
+    }
+
+    @Override
+    public URL getServiceUrl() {
+      return RegistryConfig.getServiceUrl(this);
     }
   }
 
   /** Which App Engine service this action lives on. */
-  Service service();
+  GaeService service();
+
+  /** Which GKE service this action lives on. */
+  GkeService gkeService() default GkeService.SAME_AS_GAE;
 
   /** HTTP path to serve the action from. The path components must be percent-escaped. */
   String path();
@@ -70,4 +127,22 @@ public @interface Action {
 
   /** Authentication settings. */
   Auth auth();
+
+  // TODO(jianglai): Use Action.gkeService() directly once we are off GAE.
+  class ServiceGetter {
+    public static GkeService get(Action action) {
+      GkeService service = action.gkeService();
+      if (service != GkeService.SAME_AS_GAE) {
+        return service;
+      }
+      GaeService gaeService = action.service();
+      return switch (gaeService) {
+        case DEFAULT -> GkeService.FRONTEND;
+        case BACKEND -> GkeService.BACKEND;
+        case TOOLS -> GkeService.BACKEND;
+        case BSA -> GkeService.BACKEND;
+        case PUBAPI -> GkeService.PUBAPI;
+      };
+    }
+  }
 }

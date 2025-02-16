@@ -18,15 +18,15 @@ import static com.google.common.truth.Truth.assertThat;
 import static google.registry.batch.BatchModule.PARAM_FAST;
 import static google.registry.batch.ResaveAllEppResourcesPipelineAction.PIPELINE_NAME;
 import static google.registry.beam.BeamUtils.createJobName;
-import static javax.servlet.http.HttpServletResponse.SC_OK;
+import static jakarta.servlet.http.HttpServletResponse.SC_OK;
 import static org.mockito.Mockito.verify;
 
 import com.google.api.services.dataflow.model.LaunchFlexTemplateParameter;
 import com.google.api.services.dataflow.model.LaunchFlexTemplateRequest;
 import com.google.common.collect.ImmutableMap;
 import google.registry.beam.BeamActionTestBase;
-import google.registry.config.RegistryEnvironment;
 import google.registry.testing.FakeClock;
+import google.registry.util.RegistryEnvironment;
 import org.junit.jupiter.api.Test;
 
 /** Unit tests for {@link ResaveAllEppResourcesPipelineAction}. */

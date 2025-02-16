@@ -15,8 +15,10 @@
 package google.registry.rdap;
 
 import static com.google.common.truth.Truth.assertThat;
-import static google.registry.rdap.RdapTestHelper.assertThat;
+import static google.registry.model.EppResourceUtils.loadByForeignKey;
 import static google.registry.testing.DatabaseHelper.createTld;
+import static google.registry.testing.DatabaseHelper.persistActiveDomain;
+import static google.registry.testing.DatabaseHelper.persistDomainWithDependentResources;
 import static google.registry.testing.DatabaseHelper.persistResource;
 import static google.registry.testing.DatabaseHelper.persistSimpleResources;
 import static google.registry.testing.FullFieldsTestEntityHelper.makeAndPersistHost;
@@ -24,12 +26,17 @@ import static google.registry.testing.FullFieldsTestEntityHelper.makeDomain;
 import static google.registry.testing.FullFieldsTestEntityHelper.makeHistoryEntry;
 import static google.registry.testing.FullFieldsTestEntityHelper.makeRegistrar;
 import static google.registry.testing.FullFieldsTestEntityHelper.makeRegistrarPocs;
+import static google.registry.testing.GsonSubject.assertAboutJson;
 import static org.mockito.Mockito.verify;
 
+import com.google.common.collect.ImmutableSet;
 import com.google.gson.JsonObject;
 import google.registry.model.contact.Contact;
 import google.registry.model.domain.Domain;
+import google.registry.model.domain.GracePeriod;
 import google.registry.model.domain.Period;
+import google.registry.model.domain.rgp.GracePeriodStatus;
+import google.registry.model.eppcommon.StatusValue;
 import google.registry.model.host.Host;
 import google.registry.model.registrar.Registrar;
 import google.registry.model.reporting.HistoryEntry;
@@ -41,6 +48,7 @@ import google.registry.rdap.RdapSearchResults.IncompletenessWarningType;
 import google.registry.request.Action;
 import google.registry.testing.FullFieldsTestEntityHelper;
 import java.util.Optional;
+import org.joda.time.DateTime;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.Test;
@@ -57,6 +65,9 @@ class RdapDomainActionTest extends RdapActionBaseTestCase<RdapDomainAction> {
     super(RdapDomainAction.class);
   }
 
+  private Contact registrantLol;
+  private Host host1;
+
   @BeforeEach
   void beforeEach() {
     // lol
@@ -64,7 +75,7 @@ class RdapDomainActionTest extends RdapActionBaseTestCase<RdapDomainAction> {
     Registrar registrarLol = persistResource(makeRegistrar(
         "evilregistrar", "Yes Virginia <script>", Registrar.State.ACTIVE));
     persistSimpleResources(makeRegistrarPocs(registrarLol));
-    Contact registrantLol =
+    registrantLol =
         FullFieldsTestEntityHelper.makeAndPersistContact(
             "5372808-ERL",
             "Goblin Market",
@@ -81,7 +92,7 @@ class RdapDomainActionTest extends RdapActionBaseTestCase<RdapDomainAction> {
     Contact techContactLol =
         FullFieldsTestEntityHelper.makeAndPersistContact(
             "5372808-TRL", "The Raven", "bog@cat.lol", clock.nowUtc().minusYears(3), registrarLol);
-    Host host1 = makeAndPersistHost("ns1.cat.lol", "1.2.3.4", null, clock.nowUtc().minusYears(1));
+    host1 = makeAndPersistHost("ns1.cat.lol", "1.2.3.4", null, clock.nowUtc().minusYears(1));
     Host host2 =
         makeAndPersistHost(
             "ns2.cat.lol", "bad:f00d:cafe:0:0:0:15:beef", clock.nowUtc().minusYears(2));
@@ -221,7 +232,8 @@ class RdapDomainActionTest extends RdapActionBaseTestCase<RdapDomainAction> {
   }
 
   private void assertProperResponseForCatLol(String queryString, String expectedOutputFile) {
-    assertThat(generateActualJson(queryString))
+    assertAboutJson()
+        .that(generateActualJson(queryString))
         .isEqualTo(
             addBoilerplate(
                 jsonFileBuilder()
@@ -238,7 +250,8 @@ class RdapDomainActionTest extends RdapActionBaseTestCase<RdapDomainAction> {
 
   @Test
   void testInvalidDomain_returns400() {
-    assertThat(generateActualJson("invalid/domain/name"))
+    assertAboutJson()
+        .that(generateActualJson("invalid/domain/name"))
         .isEqualTo(
             generateExpectedJsonError(
                 "invalid/domain/name is not a valid domain name: Domain names can only contain a-z,"
@@ -249,7 +262,8 @@ class RdapDomainActionTest extends RdapActionBaseTestCase<RdapDomainAction> {
 
   @Test
   void testUnknownDomain_returns400() {
-    assertThat(generateActualJson("missingdomain.com"))
+    assertAboutJson()
+        .that(generateActualJson("missingdomain.com"))
         .isEqualTo(
             generateExpectedJsonError(
                 "missingdomain.com is not a valid domain name: Domain name is under tld com which"
@@ -271,35 +285,73 @@ class RdapDomainActionTest extends RdapActionBaseTestCase<RdapDomainAction> {
   }
 
   @Test
-  void testValidDomain_notLoggedIn_noContacts() {
-    assertProperResponseForCatLol("cat.lol", "rdap_domain_no_contacts_with_remark.json");
+  void testValidDomain_notLoggedIn_redactsAllContactInfo() {
+    assertProperResponseForCatLol("cat.lol", "rdap_domain_redacted_contacts_with_remark.json");
   }
 
   @Test
-  void testValidDomain_loggedInAsOtherRegistrar_noContacts() {
+  void testValidDomain_notLoggedIn_showsNoRegistrant_whenRegistrantDoesntExist() {
+    persistResource(
+        loadByForeignKey(Domain.class, "cat.lol", clock.nowUtc())
+            .get()
+            .asBuilder()
+            .setRegistrant(Optional.empty())
+            .build());
+    assertProperResponseForCatLol("cat.lol", "rdap_domain_no_registrant_with_remark.json");
+  }
+
+  @Test
+  void testValidDomain_notLoggedIn_containsNoContactEntities_whenNoContactsExist() {
+    persistResource(
+        loadByForeignKey(Domain.class, "cat.lol", clock.nowUtc())
+            .get()
+            .asBuilder()
+            .setRegistrant(Optional.empty())
+            .setContacts(ImmutableSet.of())
+            .build());
+    assertProperResponseForCatLol("cat.lol", "rdap_domain_no_contacts_exist_with_remark.json");
+  }
+
+  @Test
+  void testValidDomain_loggedIn_containsNoContactEntities_whenNoContactsExist() {
+    login("evilregistrar");
+    persistResource(
+        loadByForeignKey(Domain.class, "cat.lol", clock.nowUtc())
+            .get()
+            .asBuilder()
+            .setRegistrant(Optional.empty())
+            .setContacts(ImmutableSet.of())
+            .build());
+    assertProperResponseForCatLol("cat.lol", "rdap_domain_no_contacts_exist_with_remark.json");
+  }
+
+  @Test
+  void testValidDomain_loggedInAsOtherRegistrar_redactsAllContactInfo() {
     login("idnregistrar");
-    assertProperResponseForCatLol("cat.lol", "rdap_domain_no_contacts_with_remark.json");
+    assertProperResponseForCatLol("cat.lol", "rdap_domain_redacted_contacts_with_remark.json");
   }
 
   @Test
   void testUpperCase_ignored() {
-    assertProperResponseForCatLol("CaT.lOl", "rdap_domain_no_contacts_with_remark.json");
+    assertProperResponseForCatLol("CaT.lOl", "rdap_domain_redacted_contacts_with_remark.json");
   }
 
   @Test
   void testTrailingDot_ignored() {
-    assertProperResponseForCatLol("cat.lol.", "rdap_domain_no_contacts_with_remark.json");
+    assertProperResponseForCatLol("cat.lol.", "rdap_domain_redacted_contacts_with_remark.json");
   }
 
   @Test
   void testQueryParameter_ignored() {
-    assertProperResponseForCatLol("cat.lol?key=value", "rdap_domain_no_contacts_with_remark.json");
+    assertProperResponseForCatLol(
+        "cat.lol?key=value", "rdap_domain_redacted_contacts_with_remark.json");
   }
 
   @Test
   void testIdnDomain_works() {
     login("idnregistrar");
-    assertThat(generateActualJson("cat.みんな"))
+    assertAboutJson()
+        .that(generateActualJson("cat.みんな"))
         .isEqualTo(
             addBoilerplate(
                 jsonFileBuilder()
@@ -317,7 +369,8 @@ class RdapDomainActionTest extends RdapActionBaseTestCase<RdapDomainAction> {
   @Test
   void testIdnDomainWithPercentEncoding_works() {
     login("idnregistrar");
-    assertThat(generateActualJson("cat.%E3%81%BF%E3%82%93%E3%81%AA"))
+    assertAboutJson()
+        .that(generateActualJson("cat.%E3%81%BF%E3%82%93%E3%81%AA"))
         .isEqualTo(
             addBoilerplate(
                 jsonFileBuilder()
@@ -335,7 +388,8 @@ class RdapDomainActionTest extends RdapActionBaseTestCase<RdapDomainAction> {
   @Test
   void testPunycodeDomain_works() {
     login("idnregistrar");
-    assertThat(generateActualJson("cat.xn--q9jyb4c"))
+    assertAboutJson()
+        .that(generateActualJson("cat.xn--q9jyb4c"))
         .isEqualTo(
             addBoilerplate(
                 jsonFileBuilder()
@@ -353,7 +407,8 @@ class RdapDomainActionTest extends RdapActionBaseTestCase<RdapDomainAction> {
   @Test
   void testMultilevelDomain_works() {
     login("1tldregistrar");
-    assertThat(generateActualJson("cat.1.tld"))
+    assertAboutJson()
+        .that(generateActualJson("cat.1.tld"))
         .isEqualTo(
             addBoilerplate(
                 jsonFileBuilder()
@@ -379,7 +434,8 @@ class RdapDomainActionTest extends RdapActionBaseTestCase<RdapDomainAction> {
 
   @Test
   void testDeletedDomain_notFound() {
-    assertThat(generateActualJson("dodo.lol"))
+    assertAboutJson()
+        .that(generateActualJson("dodo.lol"))
         .isEqualTo(generateExpectedJsonError("dodo.lol not found", 404));
     assertThat(response.getStatus()).isEqualTo(404);
   }
@@ -410,7 +466,8 @@ class RdapDomainActionTest extends RdapActionBaseTestCase<RdapDomainAction> {
   void testDeletedDomain_works_loggedInAsCorrectRegistrar() {
     login("evilregistrar");
     action.includeDeletedParam = Optional.of(true);
-    assertThat(generateActualJson("dodo.lol"))
+    assertAboutJson()
+        .that(generateActualJson("dodo.lol"))
         .isEqualTo(
             addBoilerplate(
                 jsonFileBuilder()
@@ -429,7 +486,8 @@ class RdapDomainActionTest extends RdapActionBaseTestCase<RdapDomainAction> {
   void testDeletedDomain_works_loggedInAsAdmin() {
     loginAsAdmin();
     action.includeDeletedParam = Optional.of(true);
-    assertThat(generateActualJson("dodo.lol"))
+    assertAboutJson()
+        .that(generateActualJson("dodo.lol"))
         .isEqualTo(
             addBoilerplate(
                 jsonFileBuilder()
@@ -442,6 +500,93 @@ class RdapDomainActionTest extends RdapActionBaseTestCase<RdapDomainAction> {
                     .addRegistrar("Yes Virginia <script>")
                     .load("rdap_domain_deleted.json")));
     assertThat(response.getStatus()).isEqualTo(200);
+  }
+
+  @Test
+  void testAddGracePeriod() {
+    persistActiveDomainWithHost(
+        "addgraceperiod", "lol", clock.nowUtc(), clock.nowUtc().plusYears(1));
+    assertAboutJson()
+        .that(generateActualJson("addgraceperiod.lol"))
+        .isEqualTo(addBoilerplate(jsonFileBuilder().load("rdap_domain_add_grace_period.json")));
+  }
+
+  @Test
+  void testAutoRenewGracePeriod() {
+    persistActiveDomainWithHost(
+        "autorenew", "lol", clock.nowUtc().minusYears(1).minusDays(1), clock.nowUtc().minusDays(1));
+    assertAboutJson()
+        .that(generateActualJson("autorenew.lol"))
+        .isEqualTo(
+            addBoilerplate(jsonFileBuilder().load("rdap_domain_auto_renew_grace_period.json")));
+  }
+
+  @Test
+  void testRedemptionGracePeriod() {
+    Domain domain = persistActiveDomain("redemption.lol", clock.nowUtc().minusYears(1));
+    persistResource(
+        domain
+            .asBuilder()
+            .addNameserver(host1.createVKey())
+            .setDeletionTime(clock.nowUtc().plusDays(1))
+            .setStatusValues(ImmutableSet.of(StatusValue.PENDING_DELETE))
+            .setGracePeriods(
+                ImmutableSet.of(
+                    GracePeriod.createWithoutBillingEvent(
+                        GracePeriodStatus.REDEMPTION,
+                        domain.getRepoId(),
+                        clock.nowUtc().plusDays(4),
+                        "TheRegistrar")))
+            .build());
+    assertAboutJson()
+        .that(generateActualJson("redemption.lol"))
+        .isEqualTo(
+            addBoilerplate(
+                jsonFileBuilder().load("rdap_domain_pending_delete_redemption_grace_period.json")));
+  }
+
+  @Test
+  void testRenewGracePeriod() {
+    Domain domain =
+        persistActiveDomainWithHost(
+            "renew", "lol", clock.nowUtc().minusYears(1), clock.nowUtc().plusYears(1));
+    persistResource(
+        domain
+            .asBuilder()
+            .addGracePeriod(
+                GracePeriod.create(
+                    GracePeriodStatus.RENEW,
+                    domain.getRepoId(),
+                    clock.nowUtc().plusDays(1),
+                    "TheRegistrar",
+                    null))
+            .build());
+    assertAboutJson()
+        .that(generateActualJson("renew.lol"))
+        .isEqualTo(
+            addBoilerplate(jsonFileBuilder().load("rdap_domain_explicit_renew_grace_period.json")));
+  }
+
+  @Test
+  void testTransferGracePeriod() {
+    Domain domain =
+        persistActiveDomainWithHost(
+            "transfer", "lol", clock.nowUtc().minusMonths(6), clock.nowUtc().plusYears(1));
+    persistResource(
+        domain
+            .asBuilder()
+            .addGracePeriod(
+                GracePeriod.create(
+                    GracePeriodStatus.TRANSFER,
+                    domain.getRepoId(),
+                    clock.nowUtc().plusDays(1),
+                    "TheRegistrar",
+                    null))
+            .build());
+    assertAboutJson()
+        .that(generateActualJson("transfer.lol"))
+        .isEqualTo(
+            addBoilerplate(jsonFileBuilder().load("rdap_domain_transfer_grace_period.json")));
   }
 
   @Test
@@ -461,5 +606,15 @@ class RdapDomainActionTest extends RdapActionBaseTestCase<RdapDomainAction> {
                 .setStatusCode(200)
                 .setIncompletenessWarningType(IncompletenessWarningType.COMPLETE)
                 .build());
+  }
+
+  private Domain persistActiveDomainWithHost(
+      String label, String tld, DateTime creationTime, DateTime expirationTime) {
+    return persistResource(
+        persistDomainWithDependentResources(
+                label, tld, registrantLol, clock.nowUtc(), creationTime, expirationTime)
+            .asBuilder()
+            .addNameserver(host1.createVKey())
+            .build());
   }
 }
