@@ -38,6 +38,7 @@ class CreateDomainCommandTest extends EppToolCommandTestCase<CreateDomainCommand
   @BeforeEach
   void beforeEach() {
     command.passwordGenerator = new DeterministicStringGenerator("abcdefghijklmnopqrstuvwxyz");
+    command.printStream = System.out;
   }
 
   @Test
@@ -207,7 +208,7 @@ class CreateDomainCommandTest extends EppToolCommandTestCase<CreateDomainCommand
         "--registrant=crr-admin",
         "--admins=crr-admin",
         "--techs=crr-tech",
-        "--reason=\"Creating test domain\"",
+        "--reason=Creating test domain",
         "--registrar_request=false",
         "example.tld");
     eppVerifier.verifySent("domain_create_metadata.xml");

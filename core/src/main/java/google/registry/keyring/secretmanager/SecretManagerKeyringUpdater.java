@@ -24,14 +24,16 @@ import static google.registry.keyring.secretmanager.SecretManagerKeyring.PublicK
 import static google.registry.keyring.secretmanager.SecretManagerKeyring.PublicKeyLabel.RDE_RECEIVER_PUBLIC;
 import static google.registry.keyring.secretmanager.SecretManagerKeyring.PublicKeyLabel.RDE_SIGNING_PUBLIC;
 import static google.registry.keyring.secretmanager.SecretManagerKeyring.PublicKeyLabel.RDE_STAGING_PUBLIC;
+import static google.registry.keyring.secretmanager.SecretManagerKeyring.StringKeyLabel.BSA_API_KEY_STRING;
 import static google.registry.keyring.secretmanager.SecretManagerKeyring.StringKeyLabel.ICANN_REPORTING_PASSWORD_STRING;
-import static google.registry.keyring.secretmanager.SecretManagerKeyring.StringKeyLabel.JSON_CREDENTIAL_STRING;
 import static google.registry.keyring.secretmanager.SecretManagerKeyring.StringKeyLabel.MARKSDB_DNL_LOGIN_STRING;
 import static google.registry.keyring.secretmanager.SecretManagerKeyring.StringKeyLabel.MARKSDB_LORDN_PASSWORD_STRING;
 import static google.registry.keyring.secretmanager.SecretManagerKeyring.StringKeyLabel.MARKSDB_SMDRL_LOGIN_STRING;
 import static google.registry.keyring.secretmanager.SecretManagerKeyring.StringKeyLabel.RDE_SSH_CLIENT_PRIVATE_STRING;
 import static google.registry.keyring.secretmanager.SecretManagerKeyring.StringKeyLabel.RDE_SSH_CLIENT_PUBLIC_STRING;
 import static google.registry.keyring.secretmanager.SecretManagerKeyring.StringKeyLabel.SAFE_BROWSING_API_KEY;
+import static google.registry.keyring.secretmanager.SecretManagerKeyring.StringKeyLabel.SQL_PRIMARY_CONN_NAME;
+import static google.registry.keyring.secretmanager.SecretManagerKeyring.StringKeyLabel.SQL_REPLICA_CONN_NAME;
 import static google.registry.util.PreconditionsUtils.checkArgumentNotNull;
 
 import com.google.common.flogger.FluentLogger;
@@ -120,8 +122,16 @@ public final class SecretManagerKeyringUpdater {
     return setString(login, MARKSDB_SMDRL_LOGIN_STRING);
   }
 
-  public SecretManagerKeyringUpdater setJsonCredential(String credential) {
-    return setString(credential, JSON_CREDENTIAL_STRING);
+  public SecretManagerKeyringUpdater setBsaApiKey(String credential) {
+    return setString(credential, BSA_API_KEY_STRING);
+  }
+
+  public SecretManagerKeyringUpdater setSqlPrimaryConnectionName(String name) {
+    return setString(name, SQL_PRIMARY_CONN_NAME);
+  }
+
+  public SecretManagerKeyringUpdater setSqlReplicaConnectionName(String name) {
+    return setString(name, SQL_REPLICA_CONN_NAME);
   }
 
   /**

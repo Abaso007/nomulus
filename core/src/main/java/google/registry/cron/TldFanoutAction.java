@@ -40,12 +40,14 @@ import com.google.common.collect.Streams;
 import com.google.common.flogger.FluentLogger;
 import google.registry.batch.CloudTasksUtils;
 import google.registry.request.Action;
-import google.registry.request.Action.Service;
+import google.registry.request.Action.GaeService;
+import google.registry.request.Action.GkeService;
 import google.registry.request.Parameter;
 import google.registry.request.ParameterMap;
 import google.registry.request.RequestParameters;
 import google.registry.request.Response;
 import google.registry.request.auth.Auth;
+import google.registry.util.RegistryEnvironment;
 import java.util.Optional;
 import java.util.stream.Stream;
 import javax.inject.Inject;
@@ -53,7 +55,7 @@ import javax.inject.Inject;
 /**
  * Action for fanning out cron tasks shared by TLD.
  *
- * <h3>Parameters Reference</h3>
+ * <h2>Parameters Reference</h2>
  *
  * <ul>
  *   <li>{@code endpoint} (Required) URL path of servlet to launch. This may contain pathargs.
@@ -68,7 +70,7 @@ import javax.inject.Inject;
  *       task.
  * </ul>
  *
- * <h3>Patharg Reference</h3>
+ * <h2>Patharg Reference</h2>
  *
  * <p>The following values may be specified inside the "endpoint" param.
  *
@@ -78,10 +80,10 @@ import javax.inject.Inject;
  * </ul>
  */
 @Action(
-    service = Action.Service.BACKEND,
+    service = GaeService.BACKEND,
     path = "/_dr/cron/fanout",
     automaticallyPrintOk = true,
-    auth = Auth.AUTH_API_ADMIN)
+    auth = Auth.AUTH_ADMIN)
 public final class TldFanoutAction implements Runnable {
 
   /** A set of control params to TldFanoutAction that aren't passed down to the executing action. */
@@ -157,7 +159,11 @@ public final class TldFanoutAction implements Runnable {
       params = ArrayListMultimap.create(params);
       params.put(RequestParameters.PARAM_TLD, tld);
     }
-    return cloudTasksUtils.createPostTaskWithJitter(
-        endpoint, Service.BACKEND, params, jitterSeconds);
+    return cloudTasksUtils.createTaskWithJitter(
+        endpoint,
+        Action.Method.POST,
+        RegistryEnvironment.isOnJetty() ? GkeService.BACKEND : GaeService.BACKEND,
+        params,
+        jitterSeconds);
   }
 }

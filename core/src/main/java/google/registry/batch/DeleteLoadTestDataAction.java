@@ -16,16 +16,16 @@ package google.registry.batch;
 
 import static com.google.common.base.Preconditions.checkState;
 import static com.google.common.collect.ImmutableSet.toImmutableSet;
-import static google.registry.batch.BatchModule.PARAM_DRY_RUN;
-import static google.registry.config.RegistryEnvironment.PRODUCTION;
+import static google.registry.persistence.PersistenceModule.TransactionIsolationLevel.TRANSACTION_REPEATABLE_READ;
 import static google.registry.persistence.transaction.TransactionManagerFactory.tm;
 import static google.registry.request.Action.Method.POST;
+import static google.registry.request.RequestParameters.PARAM_DRY_RUN;
 import static google.registry.util.DateTimeUtils.END_OF_TIME;
+import static google.registry.util.RegistryEnvironment.PRODUCTION;
 
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableSet;
 import com.google.common.flogger.FluentLogger;
-import google.registry.config.RegistryEnvironment;
 import google.registry.flows.poll.PollFlowUtils;
 import google.registry.model.EppResource;
 import google.registry.model.EppResourceUtils;
@@ -37,9 +37,11 @@ import google.registry.model.reporting.HistoryEntry;
 import google.registry.model.reporting.HistoryEntryDao;
 import google.registry.persistence.VKey;
 import google.registry.request.Action;
+import google.registry.request.Action.GaeService;
 import google.registry.request.Parameter;
 import google.registry.request.auth.Auth;
 import google.registry.util.Clock;
+import google.registry.util.RegistryEnvironment;
 import javax.inject.Inject;
 
 /**
@@ -53,10 +55,10 @@ import javax.inject.Inject;
  * production.
  */
 @Action(
-    service = Action.Service.BACKEND,
+    service = GaeService.BACKEND,
     path = "/_dr/task/deleteLoadTestData",
     method = POST,
-    auth = Auth.AUTH_API_ADMIN)
+    auth = Auth.AUTH_ADMIN)
 public class DeleteLoadTestDataAction implements Runnable {
 
   private static final FluentLogger logger = FluentLogger.forEnclosingClass();
@@ -90,6 +92,7 @@ public class DeleteLoadTestDataAction implements Runnable {
         "This action is not safe to run on PRODUCTION.");
 
     tm().transact(
+            TRANSACTION_REPEATABLE_READ,
             () -> {
               LOAD_TEST_REGISTRARS.forEach(this::deletePollMessages);
               tm().loadAllOfStream(Contact.class).forEach(this::deleteContact);

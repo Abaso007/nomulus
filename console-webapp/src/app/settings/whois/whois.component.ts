@@ -1,4 +1,4 @@
-// Copyright 2023 The Nomulus Authors. All Rights Reserved.
+// Copyright 2024 The Nomulus Authors. All Rights Reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,11 +12,42 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import { Component } from '@angular/core';
+import { Component, computed } from '@angular/core';
+import { RegistrarService } from 'src/app/registrar/registrar.service';
+
+import { WhoisService } from './whois.service';
 
 @Component({
   selector: 'app-whois',
   templateUrl: './whois.component.html',
   styleUrls: ['./whois.component.scss'],
+  standalone: false,
 })
-export default class WhoisComponent {}
+export default class WhoisComponent {
+  public static PATH = 'whois';
+  formattedAddress = computed(() => {
+    let result = '';
+    const registrar = this.registrarService.registrar();
+    if (registrar?.localizedAddress?.street) {
+      result += `${registrar?.localizedAddress?.street?.join(' ')} `;
+    }
+    if (registrar?.localizedAddress?.city) {
+      result += `${registrar?.localizedAddress?.city} `;
+    }
+    if (registrar?.localizedAddress?.state) {
+      result += `${registrar?.localizedAddress?.state} `;
+    }
+    if (registrar?.localizedAddress?.countryCode) {
+      result += `${registrar?.localizedAddress?.countryCode} `;
+    }
+    if (registrar?.localizedAddress?.zip) {
+      result += registrar?.localizedAddress?.zip;
+    }
+    return result;
+  });
+
+  constructor(
+    public whoisService: WhoisService,
+    public registrarService: RegistrarService
+  ) {}
+}

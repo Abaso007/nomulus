@@ -15,30 +15,70 @@
 package google.registry.tools;
 
 import static com.google.common.truth.Truth.assertThat;
-import static com.google.common.truth.Truth8.assertThat;
+import static google.registry.model.console.User.IAP_SECURED_WEB_APP_USER_ROLE;
 import static org.junit.Assert.assertThrows;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
+import static org.mockito.Mockito.verifyNoMoreInteractions;
 
-import google.registry.model.console.GlobalRole;
+import com.google.common.collect.ImmutableMap;
+import com.google.common.net.MediaType;
 import google.registry.model.console.User;
-import google.registry.model.console.UserDao;
-import google.registry.model.console.UserRoles;
+import google.registry.persistence.VKey;
+import google.registry.testing.DatabaseHelper;
+import google.registry.tools.server.UpdateUserGroupAction;
+import java.util.Optional;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 /** Tests for {@link DeleteUserCommand}. */
 public class DeleteUserCommandTest extends CommandTestCase<DeleteUserCommand> {
 
+  private final IamClient iamClient = mock(IamClient.class);
+  private final ServiceConnection connection = mock(ServiceConnection.class);
+
+  @BeforeEach
+  void beforeEach() {
+    command.iamClient = iamClient;
+    command.maybeGroupEmailAddress = Optional.empty();
+    command.setConnection(connection);
+  }
+
   @Test
   void testSuccess_deletesUser() throws Exception {
-    User user =
-        new User.Builder()
-            .setEmailAddress("email@example.test")
-            .setUserRoles(
-                new UserRoles.Builder().setGlobalRole(GlobalRole.FTE).setIsAdmin(true).build())
-            .build();
-    UserDao.saveUser(user);
-    assertThat(UserDao.loadUser("email@example.test")).isPresent();
+    DatabaseHelper.createAdminUser("email@example.test");
+    VKey<User> key = VKey.create(User.class, "email@example.test");
+    assertThat(DatabaseHelper.loadByKeyIfPresent(key)).isPresent();
     runCommandForced("--email", "email@example.test");
-    assertThat(UserDao.loadUser("email@example.test")).isEmpty();
+    assertThat(DatabaseHelper.loadByKeyIfPresent(key)).isEmpty();
+    verify(iamClient).removeBinding("email@example.test", IAP_SECURED_WEB_APP_USER_ROLE);
+    verifyNoMoreInteractions(iamClient);
+    verifyNoInteractions(connection);
+  }
+
+  @Test
+  void testSuccess_deletesUser_removeFromGroup() throws Exception {
+    command.maybeGroupEmailAddress = Optional.of("group@example.test");
+    DatabaseHelper.createAdminUser("email@example.test");
+    VKey<User> key = VKey.create(User.class, "email@example.test");
+    assertThat(DatabaseHelper.loadByKeyIfPresent(key)).isPresent();
+    runCommandForced("--email", "email@example.test");
+    assertThat(DatabaseHelper.loadByKeyIfPresent(key)).isEmpty();
+    verify(connection)
+        .sendPostRequest(
+            UpdateUserGroupAction.PATH,
+            ImmutableMap.of(
+                "userEmailAddress",
+                "email@example.test",
+                "groupEmailAddress",
+                "group@example.test",
+                "groupUpdateMode",
+                "REMOVE"),
+            MediaType.PLAIN_TEXT_UTF_8,
+            new byte[0]);
+    verifyNoInteractions(iamClient);
+    verifyNoMoreInteractions(connection);
   }
 
   @Test
@@ -49,5 +89,7 @@ public class DeleteUserCommandTest extends CommandTestCase<DeleteUserCommand> {
                 () -> runCommandForced("--email", "nonexistent@example.test")))
         .hasMessageThat()
         .isEqualTo("Email does not correspond to a valid user");
+    verifyNoInteractions(iamClient);
+    verifyNoInteractions(connection);
   }
 }

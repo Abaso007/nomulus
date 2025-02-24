@@ -1,0 +1,99 @@
+apiVersion: gateway.networking.k8s.io/v1beta1
+kind: HTTPRoute
+metadata:
+  name: backend
+spec:
+  parentRefs:
+  - kind: Gateway
+    name: nomulus
+    sectionName: https
+  hostnames:
+    - "backend.BASE_DOMAIN"
+  rules:
+  - matches:
+    - path:
+        type: PathPrefix
+        value: /_dr/task
+    - path:
+        type: PathPrefix
+        value: /_dr/cron
+    - path:
+        type: PathPrefix
+        value: /_dr/admin
+    - path:
+        type: PathPrefix
+        value: /_dr/epptool
+    - path:
+        type: PathPrefix
+        value: /loadtest
+    backendRefs:
+    - group: net.gke.io
+      kind: ServiceImport
+      name: backend
+      port: 80
+  - matches:
+    - path:
+        type: PathPrefix
+        value: /_dr/task
+      headers:
+      - name: "canary"
+        value: "true"
+    - path:
+        type: PathPrefix
+        value: /_dr/cron
+      headers:
+      - name: "canary"
+        value: "true"
+    - path:
+        type: PathPrefix
+        value: /_dr/admin
+      headers:
+      - name: "canary"
+        value: "true"
+    - path:
+        type: PathPrefix
+        value: /_dr/epptool
+      headers:
+      - name: "canary"
+        value: "true"
+    - path:
+        type: PathPrefix
+        value: /loadtest
+      headers:
+      - name: "canary"
+        value: "true"
+    backendRefs:
+    - group: net.gke.io
+      kind: ServiceImport
+      name: backend-canary
+      port: 80
+---
+apiVersion: networking.gke.io/v1
+kind: HealthCheckPolicy
+metadata:
+  name: backend
+spec:
+  default:
+    config:
+      type: HTTP
+      httpHealthCheck:
+        requestPath: /healthz/
+  targetRef:
+    group: net.gke.io
+    kind: ServiceImport
+    name: backend
+---
+apiVersion: networking.gke.io/v1
+kind: HealthCheckPolicy
+metadata:
+  name: backend-canary
+spec:
+  default:
+    config:
+      type: HTTP
+      httpHealthCheck:
+        requestPath: /healthz/
+  targetRef:
+    group: net.gke.io
+    kind: ServiceImport
+    name: backend-canary

@@ -24,9 +24,9 @@ import com.google.common.base.Ascii;
 import com.google.common.base.Splitter;
 import com.google.common.collect.ImmutableSet;
 import google.registry.request.HttpException.BadRequestException;
+import jakarta.servlet.http.HttpServletRequest;
 import java.util.Optional;
 import javax.annotation.Nullable;
-import javax.servlet.http.HttpServletRequest;
 import org.joda.time.DateTime;
 
 /** Utilities for extracting parameters from HTTP requests. */
@@ -34,8 +34,17 @@ public final class RequestParameters {
 
   /** The standardized request parameter name used by any action taking a tld parameter. */
   public static final String PARAM_TLD = "tld";
+
   /** The standardized request parameter name used by any action taking multiple tld parameters. */
   public static final String PARAM_TLDS = "tlds";
+
+  /** The standardized request parameter name used by any action in dry run mode. */
+  public static final String PARAM_DRY_RUN = "dryRun";
+
+  /**
+   * The standardized request parameter name used by any action taking a configurable batch size.
+   */
+  public static final String PARAM_BATCH_SIZE = "batchSize";
 
   /**
    * Returns first GET or POST parameter associated with {@code name}.
@@ -100,6 +109,20 @@ public final class RequestParameters {
   /**
    * Returns first GET or POST parameter associated with {@code name} as a long.
    *
+   * @throws BadRequestException if request parameter is present but not a valid long
+   */
+  public static Optional<Long> extractOptionalLongParameter(HttpServletRequest req, String name) {
+    String stringParam = req.getParameter(name);
+    try {
+      return isNullOrEmpty(stringParam) ? Optional.empty() : Optional.of(Long.valueOf(stringParam));
+    } catch (NumberFormatException e) {
+      throw new BadRequestException("Expected long: " + name);
+    }
+  }
+
+  /**
+   * Returns first GET or POST parameter associated with {@code name} as a long.
+   *
    * @throws BadRequestException if request parameter is absent, empty, or not a valid long
    */
   public static long extractLongParameter(HttpServletRequest req, String name) {
@@ -123,10 +146,10 @@ public final class RequestParameters {
    * <p>Both missing parameter and parameter with empty value result in an empty set.
    *
    * @param req the request that has the parameter
-   * @param name the name of the parameter, should be in plural form (e.g. tlds=, not tld=)
+   * @param name the name of the parameter (should be in plural form. e.g., tlds=, not tld=)
    */
   public static ImmutableSet<String> extractSetOfParameters(HttpServletRequest req, String name) {
-    // First we make sure the user didn't accidentally try to pass the "set of parameters" as
+    // First, we make sure the user didn't accidentally try to pass the "set of parameters" as
     // multiple tld=a&tld=b parameters instead of tld=a,b
     String[] parameters = req.getParameterValues(name);
     if (parameters != null && parameters.length > 1) {
@@ -160,7 +183,7 @@ public final class RequestParameters {
    *
    * @param req the request that has the parameter
    * @param enumClass the Class of the expected Enum type
-   * @param name the name of the parameter, should be in plural form (e.g. tlds=, not tld=)
+   * @param name the name of the parameter (should be in plural form e.g., tlds=, not tld=)
    * @throws BadRequestException if any of the comma-delimited values of the request parameter named
    *     {@code name} aren't equal to any of the values in {@code enumClass}
    */
@@ -293,7 +316,7 @@ public final class RequestParameters {
   /**
    * Returns first HTTP header associated with {@code name}.
    *
-   * @param name case insensitive header name
+   * @param name case-insensitive header name
    * @throws BadRequestException if request header is absent or empty
    */
   public static String extractRequiredHeader(HttpServletRequest req, String name) {
@@ -307,7 +330,7 @@ public final class RequestParameters {
   /**
    * Returns an {@link Optional} of the first HTTP header associated with {@code name}, or empty.
    *
-   * @param name case insensitive header name
+   * @param name case-insensitive header name
    */
   public static Optional<String> extractOptionalHeader(HttpServletRequest req, String name) {
     return Optional.ofNullable(emptyToNull(req.getHeader(name)));

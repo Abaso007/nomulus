@@ -17,7 +17,6 @@ package google.registry.rde;
 import static com.google.common.io.BaseEncoding.base16;
 import static com.google.common.truth.Truth.assertThat;
 import static com.google.common.truth.Truth.assertWithMessage;
-import static com.google.common.truth.Truth8.assertThat;
 import static google.registry.testing.DatabaseHelper.createTld;
 import static google.registry.testing.DatabaseHelper.persistEppResource;
 import static google.registry.testing.DatabaseHelper.persistResource;
@@ -71,6 +70,7 @@ import google.registry.xjc.rdedomain.XjcRdeDomainElement;
 import google.registry.xjc.rgp.XjcRgpStatusType;
 import google.registry.xjc.secdns.XjcSecdnsDsDataType;
 import java.io.ByteArrayOutputStream;
+import java.util.Optional;
 import org.joda.money.Money;
 import org.joda.time.DateTime;
 import org.junit.jupiter.api.BeforeEach;
@@ -281,9 +281,14 @@ public class DomainToXjcConverterTest {
                     makeHost(clock, "4-Q9JYB4C", "ns2.cat.みんな", "bad:f00d:cafe::15:beef")
                         .createVKey()))
             .setRegistrant(
-                makeContact(
-                        clock, "12-Q9JYB4C", "5372808-ERL", "(◕‿◕) nevermore", "prophet@evil.みんな")
-                    .createVKey())
+                Optional.of(
+                    makeContact(
+                            clock,
+                            "12-Q9JYB4C",
+                            "5372808-ERL",
+                            "(◕‿◕) nevermore",
+                            "prophet@evil.みんな")
+                        .createVKey()))
             .setRegistrationExpirationTime(DateTime.parse("1930-01-01T00:00:00Z"))
             .setGracePeriods(
                 ImmutableSet.of(

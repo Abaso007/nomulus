@@ -17,13 +17,13 @@ package google.registry.persistence;
 import static com.google.common.truth.Truth.assertThat;
 
 import com.google.common.collect.ImmutableList;
+import jakarta.persistence.Entity;
+import jakarta.persistence.Id;
 import java.io.File;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import javax.persistence.Entity;
-import javax.persistence.Id;
 import org.joda.money.CurrencyUnit;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
@@ -38,7 +38,7 @@ class HibernateSchemaExporterTest {
 
   @Container
   private static final PostgreSQLContainer database =
-      new PostgreSQLContainer(NomulusPostgreSql.getDockerTag());
+      new PostgreSQLContainer(NomulusPostgreSql.getDockerImageName());
 
   private static HibernateSchemaExporter exporter;
 
@@ -59,12 +59,14 @@ class HibernateSchemaExporterTest {
     exporter.export(ImmutableList.of(HibernateSchemaTestEntity.class), sqlFile);
     assertThat(Files.readAllBytes(sqlFile.toPath()))
         .isEqualTo(
-            ("\n"
-                    + "    create table \"TestEntity\" (\n"
-                    + "       name text not null,\n"
-                    + "        cu text,\n"
-                    + "        primary key (name)\n"
-                    + "    );\n")
+            """
+
+    create table "TestEntity" (
+        name text not null,
+        cu text,
+        primary key (name)
+    );
+"""
                 .getBytes(StandardCharsets.UTF_8));
   }
 

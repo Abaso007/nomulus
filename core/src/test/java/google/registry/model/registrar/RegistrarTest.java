@@ -16,7 +16,6 @@ package google.registry.model.registrar;
 
 import static com.google.common.base.Preconditions.checkState;
 import static com.google.common.truth.Truth.assertThat;
-import static com.google.common.truth.Truth8.assertThat;
 import static google.registry.persistence.transaction.TransactionManagerFactory.tm;
 import static google.registry.testing.CertificateSamples.SAMPLE_CERT;
 import static google.registry.testing.CertificateSamples.SAMPLE_CERT2;
@@ -40,8 +39,8 @@ import com.google.common.collect.ImmutableSortedMap;
 import com.google.common.collect.ImmutableSortedSet;
 import google.registry.config.RegistryConfig;
 import google.registry.model.EntityTestCase;
-import google.registry.model.registrar.Registrar.State;
-import google.registry.model.registrar.Registrar.Type;
+import google.registry.model.registrar.RegistrarBase.State;
+import google.registry.model.registrar.RegistrarBase.Type;
 import google.registry.model.tld.Tld;
 import google.registry.model.tld.Tld.TldType;
 import google.registry.model.tld.Tlds;
@@ -66,7 +65,8 @@ class RegistrarTest extends EntityTestCase {
         newTld("xn--q9jyb4c", "MINNA")
             .asBuilder()
             .setCurrency(JPY)
-            .setCreateBillingCost(Money.of(JPY, new BigDecimal(1300)))
+            .setCreateBillingCostTransitions(
+                ImmutableSortedMap.of(START_OF_TIME, Money.of(JPY, new BigDecimal(1300))))
             .setRestoreBillingCost(Money.of(JPY, new BigDecimal(1700)))
             .setServerStatusChangeBillingCost(Money.of(JPY, new BigDecimal(1900)))
             .setRegistryLockOrUnlockBillingCost(Money.of(JPY, new BigDecimal(2700)))
@@ -129,7 +129,7 @@ class RegistrarTest extends EntityTestCase {
             .setVisibleInWhoisAsTech(false)
             .setPhoneNumber("+1.2125551213")
             .setFaxNumber("+1.2125551213")
-            .setTypes(ImmutableSet.of(RegistrarPoc.Type.ABUSE, RegistrarPoc.Type.ADMIN))
+            .setTypes(ImmutableSet.of(RegistrarPocBase.Type.ABUSE, RegistrarPocBase.Type.ADMIN))
             .build();
     persistSimpleResources(
         ImmutableList.of(
@@ -140,7 +140,8 @@ class RegistrarTest extends EntityTestCase {
                 .setEmailAddress("johndoe@example.com")
                 .setPhoneNumber("+1.2125551213")
                 .setFaxNumber("+1.2125551213")
-                .setTypes(ImmutableSet.of(RegistrarPoc.Type.LEGAL, RegistrarPoc.Type.MARKETING))
+                .setTypes(
+                    ImmutableSet.of(RegistrarPocBase.Type.LEGAL, RegistrarPocBase.Type.MARKETING))
                 .build()));
   }
 
@@ -199,6 +200,23 @@ class RegistrarTest extends EntityTestCase {
     assertThrows(
         IllegalArgumentException.class,
         () -> new Registrar.Builder().setRegistrarId("abcdefghijklmnopq"));
+  }
+
+  @Test
+  void testFailure_duplicateIanaId() {
+    persistResource(
+        registrar.asBuilder().setRegistrarId("registrar1").setIanaIdentifier(10L).build());
+
+    IllegalArgumentException thrown =
+        assertThrows(
+            IllegalArgumentException.class,
+            () ->
+                registrar.asBuilder().setRegistrarId("registrar2").setIanaIdentifier(10L).build());
+
+    assertThat(thrown)
+        .hasMessageThat()
+        .contains(
+            "Rejected attempt to create a registrar with ianaId that's already in the system");
   }
 
   @Test
@@ -309,7 +327,7 @@ class RegistrarTest extends EntityTestCase {
                 .setVisibleInWhoisAsTech(true)
                 .setPhoneNumber("+1.2125551213")
                 .setFaxNumber("+1.2125551213")
-                .setTypes(ImmutableSet.of(RegistrarPoc.Type.TECH))
+                .setTypes(ImmutableSet.of(RegistrarPocBase.Type.TECH))
                 .build());
     RegistrarPoc newTechAbuseContact =
         persistSimpleResource(
@@ -321,13 +339,13 @@ class RegistrarTest extends EntityTestCase {
                 .setVisibleInWhoisAsTech(true)
                 .setPhoneNumber("+1.2125551213")
                 .setFaxNumber("+1.2125551213")
-                .setTypes(ImmutableSet.of(RegistrarPoc.Type.TECH, RegistrarPoc.Type.ABUSE))
+                .setTypes(ImmutableSet.of(RegistrarPocBase.Type.TECH, RegistrarPocBase.Type.ABUSE))
                 .build());
     ImmutableSortedSet<RegistrarPoc> techContacts =
-        registrar.getContactsOfType(RegistrarPoc.Type.TECH);
+        registrar.getContactsOfType(RegistrarPocBase.Type.TECH);
     assertThat(techContacts).containsExactly(newTechContact, newTechAbuseContact).inOrder();
     ImmutableSortedSet<RegistrarPoc> abuseContacts =
-        registrar.getContactsOfType(RegistrarPoc.Type.ABUSE);
+        registrar.getContactsOfType(RegistrarPocBase.Type.ABUSE);
     assertThat(abuseContacts).containsExactly(newTechAbuseContact, abuseAdminContact).inOrder();
   }
 

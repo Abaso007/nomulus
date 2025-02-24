@@ -45,6 +45,8 @@ import google.registry.util.StringGenerator.Alphabets;
 import java.io.File;
 import java.util.Collection;
 import javax.annotation.Nullable;
+import org.joda.money.CurrencyUnit;
+import org.joda.money.Money;
 import org.joda.time.DateTime;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -142,8 +144,7 @@ class GenerateAllocationTokensCommandTest extends CommandTestCase<GenerateAlloca
         "--discount_premiums", "true",
         "--discount_years", "6",
         "--token_status_transitions",
-            String.format(
-                "\"%s=NOT_STARTED,%s=VALID,%s=ENDED\"", START_OF_TIME, promoStart, promoEnd));
+            String.format("%s=NOT_STARTED,%s=VALID,%s=ENDED", START_OF_TIME, promoStart, promoEnd));
     assertAllocationTokens(
         new AllocationToken.Builder()
             .setToken("promo123456789ABCDEFG")
@@ -153,6 +154,48 @@ class GenerateAllocationTokensCommandTest extends CommandTestCase<GenerateAlloca
             .setAllowedEppActions(ImmutableSet.of(CommandName.CREATE, CommandName.RENEW))
             .setDiscountFraction(0.5)
             .setDiscountPremiums(true)
+            .setDiscountYears(6)
+            .setTokenStatusTransitions(
+                ImmutableSortedMap.<DateTime, TokenStatus>naturalOrder()
+                    .put(START_OF_TIME, TokenStatus.NOT_STARTED)
+                    .put(promoStart, TokenStatus.VALID)
+                    .put(promoEnd, TokenStatus.ENDED)
+                    .build())
+            .build());
+  }
+
+  @Test
+  void testSuccess_promotionToken_withDiscountPrice() throws Exception {
+    DateTime promoStart = DateTime.now(UTC);
+    DateTime promoEnd = promoStart.plusMonths(1);
+    runCommand(
+        "--number",
+        "1",
+        "--prefix",
+        "promo",
+        "--type",
+        "UNLIMITED_USE",
+        "--allowed_client_ids",
+        "TheRegistrar,NewRegistrar",
+        "--allowed_tlds",
+        "tld,example",
+        "--allowed_epp_actions",
+        "CREATE,RENEW",
+        "--discount_price",
+        "USD 3",
+        "--discount_years",
+        "6",
+        "--token_status_transitions",
+        String.format("%s=NOT_STARTED,%s=VALID,%s=ENDED", START_OF_TIME, promoStart, promoEnd));
+    assertAllocationTokens(
+        new AllocationToken.Builder()
+            .setToken("promo123456789ABCDEFG")
+            .setTokenType(UNLIMITED_USE)
+            .setAllowedRegistrarIds(ImmutableSet.of("TheRegistrar", "NewRegistrar"))
+            .setAllowedTlds(ImmutableSet.of("tld", "example"))
+            .setAllowedEppActions(ImmutableSet.of(CommandName.CREATE, CommandName.RENEW))
+            .setDiscountPrice(Money.of(CurrencyUnit.USD, 3))
+            .setDiscountPremiums(false)
             .setDiscountYears(6)
             .setTokenStatusTransitions(
                 ImmutableSortedMap.<DateTime, TokenStatus>naturalOrder()
@@ -195,19 +238,47 @@ class GenerateAllocationTokensCommandTest extends CommandTestCase<GenerateAlloca
 
   @Test
   void testSuccess_renewalPriceBehaviorIsSpecified() throws Exception {
-    runCommand("--tokens", "foobar,foobaz", "--renewal_price_behavior", "SPECIFIED");
+    runCommand(
+        "--tokens",
+        "foobar,foobaz",
+        "--renewal_price_behavior",
+        "SPECIFIED",
+        "--renewal_price",
+        "USD 10");
     assertAllocationTokens(
-        createToken("foobar", null, null).asBuilder().setRenewalPriceBehavior(SPECIFIED).build(),
-        createToken("foobaz", null, null).asBuilder().setRenewalPriceBehavior(SPECIFIED).build());
+        createToken("foobar", null, null)
+            .asBuilder()
+            .setRenewalPriceBehavior(SPECIFIED)
+            .setRenewalPrice(Money.of(CurrencyUnit.USD, 10))
+            .build(),
+        createToken("foobaz", null, null)
+            .asBuilder()
+            .setRenewalPriceBehavior(SPECIFIED)
+            .setRenewalPrice(Money.of(CurrencyUnit.USD, 10))
+            .build());
     assertInStdout("foobar", "foobaz");
   }
 
   @Test
   void testSuccess_renewalPriceBehaviorIsSpecifiedButMixedCase() throws Exception {
-    runCommand("--tokens", "foobar,foobaz", "--renewal_price_behavior", "speCIFied");
+    runCommand(
+        "--tokens",
+        "foobar,foobaz",
+        "--renewal_price_behavior",
+        "speCIFied",
+        "--renewal_price",
+        "USD 10");
     assertAllocationTokens(
-        createToken("foobar", null, null).asBuilder().setRenewalPriceBehavior(SPECIFIED).build(),
-        createToken("foobaz", null, null).asBuilder().setRenewalPriceBehavior(SPECIFIED).build());
+        createToken("foobar", null, null)
+            .asBuilder()
+            .setRenewalPriceBehavior(SPECIFIED)
+            .setRenewalPrice(Money.of(CurrencyUnit.USD, 10))
+            .build(),
+        createToken("foobaz", null, null)
+            .asBuilder()
+            .setRenewalPriceBehavior(SPECIFIED)
+            .setRenewalPrice(Money.of(CurrencyUnit.USD, 10))
+            .build());
     assertInStdout("foobar", "foobaz");
   }
 
@@ -235,6 +306,16 @@ class GenerateAllocationTokensCommandTest extends CommandTestCase<GenerateAlloca
         .isEqualTo(
             "Invalid value for --renewal_price_behavior parameter. Allowed values:[DEFAULT,"
                 + " NONPREMIUM, SPECIFIED]");
+  }
+
+  @Test
+  void testFailure_specifiedPrice_withoutPrice() throws Exception {
+    assertThat(
+            assertThrows(
+                IllegalArgumentException.class,
+                () -> runCommand("--tokens", "foobar", "--renewal_price_behavior", "SPECIFIED")))
+        .hasMessageThat()
+        .isEqualTo("renewal_price must be specified iff renewal_price_behavior is SPECIFIED");
   }
 
   @Test
@@ -379,8 +460,8 @@ class GenerateAllocationTokensCommandTest extends CommandTestCase<GenerateAlloca
     assertThat(thrown)
         .hasMessageThat()
         .isEqualTo(
-            "Invalid value for -t parameter. Allowed values:[BULK_PRICING, DEFAULT_PROMO, PACKAGE,"
-                + " SINGLE_USE, UNLIMITED_USE]");
+            "Invalid value for --type parameter. Allowed values:[BULK_PRICING, DEFAULT_PROMO,"
+                + " PACKAGE, SINGLE_USE, UNLIMITED_USE, REGISTER_BSA]");
   }
 
   @Test
@@ -410,7 +491,7 @@ class GenerateAllocationTokensCommandTest extends CommandTestCase<GenerateAlloca
                         "--type",
                         "BULK_PRICING",
                         String.format(
-                            "--token_status_transitions=\"%s=NOT_STARTED,%s=VALID,%s=ENDED\"",
+                            "--token_status_transitions=%s=NOT_STARTED,%s=VALID,%s=ENDED",
                             START_OF_TIME, fakeClock.nowUtc(), fakeClock.nowUtc().plusDays(1)))))
         .hasMessageThat()
         .isEqualTo(

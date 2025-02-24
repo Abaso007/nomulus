@@ -15,10 +15,10 @@
 package google.registry.tools;
 
 import static com.google.common.truth.Truth.assertThat;
-import static google.registry.request.Action.Service.BACKEND;
-import static google.registry.request.Action.Service.DEFAULT;
-import static google.registry.request.Action.Service.PUBAPI;
-import static google.registry.request.Action.Service.TOOLS;
+import static google.registry.request.Action.GaeService.BACKEND;
+import static google.registry.request.Action.GaeService.DEFAULT;
+import static google.registry.request.Action.GaeService.PUBAPI;
+import static google.registry.request.Action.GaeService.TOOLS;
 import static java.nio.charset.StandardCharsets.UTF_8;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
@@ -148,19 +148,6 @@ class CurlCommandTest extends CommandTestCase<CurlCommand> {
   void testExplicitPostInvocation() throws Exception {
     runCommand("--path=/foo/bar?a=1&b=2", "--request=POST", "--service=TOOLS");
     verify(connection).withService(eq(TOOLS), eq(false));
-    verifyNoMoreInteractions(connection);
-    verify(connectionForService)
-        .sendPostRequest(
-            eq("/foo/bar?a=1&b=2"),
-            eq(ImmutableMap.<String, String>of()),
-            eq(MediaType.PLAIN_TEXT_UTF_8),
-            eq("".getBytes(UTF_8)));
-  }
-
-  @Test
-  void testCanaryInvocation() throws Exception {
-    runCommand("--path=/foo/bar?a=1&b=2", "--request=POST", "--service=TOOLS", "--canary");
-    verify(connection).withService(eq(TOOLS), eq(true));
     verifyNoMoreInteractions(connection);
     verify(connectionForService)
         .sendPostRequest(

@@ -44,7 +44,9 @@ import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.ImmutableSortedSet;
 import com.google.common.collect.Sets;
+import com.google.common.flogger.FluentLogger;
 import google.registry.batch.AsyncTaskEnqueuer;
+import google.registry.config.RegistryConfig;
 import google.registry.flows.EppException;
 import google.registry.flows.EppException.AssociationProhibitsOperationException;
 import google.registry.flows.ExtensionManager;
@@ -53,6 +55,7 @@ import google.registry.flows.FlowModule.Superuser;
 import google.registry.flows.FlowModule.TargetId;
 import google.registry.flows.MutatingFlow;
 import google.registry.flows.SessionMetadata;
+import google.registry.flows.SqlStatementLoggingFlow;
 import google.registry.flows.annotations.ReportingSpec;
 import google.registry.flows.custom.DomainDeleteFlowCustomLogic;
 import google.registry.flows.custom.DomainDeleteFlowCustomLogic.AfterValidationParameters;
@@ -115,7 +118,9 @@ import org.joda.time.Duration;
  * @error {@link DomainFlowUtils.NotAuthorizedForTldException}
  */
 @ReportingSpec(ActivityReportField.DOMAIN_DELETE)
-public final class DomainDeleteFlow implements MutatingFlow {
+public final class DomainDeleteFlow implements MutatingFlow, SqlStatementLoggingFlow {
+
+  private static final FluentLogger logger = FluentLogger.forEnclosingClass();
 
   private static final ImmutableSet<StatusValue> DISALLOWED_STATUSES = ImmutableSet.of(
       StatusValue.CLIENT_DELETE_PROHIBITED,
@@ -212,10 +217,17 @@ public final class DomainDeleteFlow implements MutatingFlow {
     // superuser (i.e. the registrar didn't request this delete and thus should be notified even if
     // it is synchronous).
     if (durationUntilDelete.isLongerThan(Duration.ZERO) || isSuperuser) {
-      PollMessage.OneTime deletePollMessage =
-          createDeletePollMessage(existingDomain, domainHistoryId, deletionTime);
-      entitiesToSave.add(deletePollMessage);
-      builder.setDeletePollMessage(deletePollMessage.createVKey());
+      if (RegistryConfig.getNoPollMessageOnDeletionRegistrarIds()
+          .contains(existingDomain.getCurrentSponsorRegistrarId())) {
+        logger.atInfo().log(
+            "Skipping poll message on domain deletion for registrar %s due to configuration",
+            existingDomain.getCurrentSponsorRegistrarId());
+      } else {
+        PollMessage.OneTime deletePollMessage =
+            createDeletePollMessage(existingDomain, domainHistoryId, deletionTime);
+        entitiesToSave.add(deletePollMessage);
+        builder.setDeletePollMessage(deletePollMessage.createVKey());
+      }
     }
 
     // Send a second poll message immediately if the domain is being deleted asynchronously by a

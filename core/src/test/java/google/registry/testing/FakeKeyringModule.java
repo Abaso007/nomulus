@@ -55,7 +55,9 @@ public final class FakeKeyringModule {
   private static final String MARKSDB_DNL_LOGIN_AND_PASSWORD = "dnl:yolo";
   private static final String MARKSDB_LORDN_PASSWORD = "yolo";
   private static final String MARKSDB_SMDRL_LOGIN_AND_PASSWORD = "smdrl:yolo";
-  private static final String JSON_CREDENTIAL = "json123";
+  private static final String BSA_API_KEY = "bsaapikey";
+  private static final String SQL_PRIMARY_CONNECTION = "project:primary-region:primary-name";
+  private static final String SQL_REPLICA_CONNECTION = "project:replica-region:replica-name";
 
   @Provides
   public Keyring get() {
@@ -127,8 +129,8 @@ public final class FakeKeyringModule {
       }
 
       @Override
-      public String getJsonCredential() {
-        return JSON_CREDENTIAL;
+      public String getBsaApiKey() {
+        return BSA_API_KEY;
       }
 
       @Override
@@ -149,6 +151,16 @@ public final class FakeKeyringModule {
       @Override
       public PGPPublicKey getBrdaReceiverKey() {
         return rdeReceiverKey;
+      }
+
+      @Override
+      public String getSqlPrimaryConnectionName() {
+        return SQL_PRIMARY_CONNECTION;
+      }
+
+      @Override
+      public String getSqlReplicaConnectionName() {
+        return SQL_REPLICA_CONNECTION;
       }
 
       @Override

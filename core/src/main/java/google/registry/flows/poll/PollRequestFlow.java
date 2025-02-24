@@ -32,6 +32,8 @@ import google.registry.model.eppoutput.EppResponse;
 import google.registry.model.poll.MessageQueueInfo;
 import google.registry.model.poll.PollMessage;
 import google.registry.model.poll.PollMessageExternalKeyConverter;
+import google.registry.persistence.IsolationLevel;
+import google.registry.persistence.PersistenceModule.TransactionIsolationLevel;
 import java.util.Optional;
 import javax.inject.Inject;
 import org.joda.time.DateTime;
@@ -47,6 +49,7 @@ import org.joda.time.DateTime;
  *
  * @error {@link PollRequestFlow.UnexpectedMessageIdException}
  */
+@IsolationLevel(value = TransactionIsolationLevel.TRANSACTION_READ_COMMITTED)
 public final class PollRequestFlow implements TransactionalFlow {
 
   @Inject ExtensionManager extensionManager;
@@ -66,7 +69,7 @@ public final class PollRequestFlow implements TransactionalFlow {
     // Return the oldest message from the queue.
     DateTime now = tm().getTransactionTime();
     Optional<PollMessage> maybePollMessage = getFirstPollMessage(registrarId, now);
-    if (!maybePollMessage.isPresent()) {
+    if (maybePollMessage.isEmpty()) {
       return responseBuilder.setResultFromCode(SUCCESS_WITH_NO_MESSAGES).build();
     }
     PollMessage pollMessage = maybePollMessage.get();

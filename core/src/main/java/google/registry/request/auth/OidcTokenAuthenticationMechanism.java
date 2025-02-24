@@ -14,29 +14,31 @@
 
 package google.registry.request.auth;
 
-import static google.registry.request.auth.AuthSettings.AuthLevel.APP;
+import static com.google.common.base.Preconditions.checkState;
+import static google.registry.persistence.transaction.TransactionManagerFactory.tm;
 
 import com.google.api.client.json.webtoken.JsonWebSignature;
-import com.google.auth.oauth2.TokenVerifier;
+import com.google.auth.oauth2.TokenVerifier.VerificationException;
 import com.google.common.annotations.VisibleForTesting;
+import com.google.common.base.Splitter;
 import com.google.common.collect.ImmutableSet;
 import com.google.common.flogger.FluentLogger;
 import google.registry.config.RegistryConfig.Config;
-import google.registry.config.RegistryEnvironment;
 import google.registry.model.console.User;
-import google.registry.model.console.UserDao;
+import google.registry.persistence.VKey;
 import google.registry.request.auth.AuthModule.IapOidc;
 import google.registry.request.auth.AuthModule.RegularOidc;
 import google.registry.request.auth.AuthSettings.AuthLevel;
+import google.registry.util.RegistryEnvironment;
+import jakarta.servlet.http.HttpServletRequest;
 import java.util.Optional;
 import javax.annotation.Nullable;
 import javax.inject.Inject;
-import javax.servlet.http.HttpServletRequest;
 
 /**
- * An authenticam mechanism that verifies the OIDC token.
+ * An authentication mechanism that verifies the OIDC token.
  *
- * <p>Currently, two flavors are supported: one that checkes for the OIDC token as a regular bearer
+ * <p>Currently, two flavors are supported: one that checks for the OIDC token as a regular bearer
  * token, and another that checks for the OIDC token passed by IAP. In both cases, the {@link
  * AuthResult} with the highest {@link AuthLevel} possible is returned. So, if the email address for
  * which the token is minted exists both as a {@link User} and as a service account, the returned
@@ -49,23 +51,23 @@ public abstract class OidcTokenAuthenticationMechanism implements Authentication
 
   public static final FluentLogger logger = FluentLogger.forEnclosingClass();
 
-  // A workaround that allows "use" of the OIDC authenticator when running local testing, i.e.
+  // A workaround that allows "use" of the OIDC authenticator when running local testing, i.e.,
   // the RegistryTestServer
   private static AuthResult authResultForTesting = null;
 
-  protected final TokenVerifier tokenVerifier;
-
   protected final TokenExtractor tokenExtractor;
+
+  protected final TokenVerifier tokenVerifier;
 
   private final ImmutableSet<String> serviceAccountEmails;
 
   protected OidcTokenAuthenticationMechanism(
       ImmutableSet<String> serviceAccountEmails,
-      TokenVerifier tokenVerifier,
-      TokenExtractor tokenExtractor) {
+      TokenExtractor tokenExtractor,
+      TokenVerifier tokenVerifier) {
     this.serviceAccountEmails = serviceAccountEmails;
-    this.tokenVerifier = tokenVerifier;
     this.tokenExtractor = tokenExtractor;
+    this.tokenVerifier = tokenVerifier;
   }
 
   @Override
@@ -79,30 +81,42 @@ public abstract class OidcTokenAuthenticationMechanism implements Authentication
     if (rawIdToken == null) {
       return AuthResult.NOT_AUTHENTICATED;
     }
-    JsonWebSignature token;
+    JsonWebSignature token = null;
     try {
-      token = tokenVerifier.verify(rawIdToken);
+      String service = null;
+      if (RegistryEnvironment.isOnJetty()) {
+        String hostname = request.getServerName();
+        service = Splitter.on('.').split(hostname).iterator().next();
+        if (request.getHeader("canary") != null) {
+          service += "-canary";
+        }
+      }
+      token = tokenVerifier.verify(service, rawIdToken);
     } catch (Exception e) {
       logger.atInfo().withCause(e).log(
           "Failed OIDC verification attempt:\n%s",
           RegistryEnvironment.get().equals(RegistryEnvironment.PRODUCTION)
               ? "Raw token redacted in prod"
               : rawIdToken);
+    }
+
+    if (token == null) {
       return AuthResult.NOT_AUTHENTICATED;
     }
+
     String email = (String) token.getPayload().get("email");
     if (email == null) {
       logger.atWarning().log("No email address from the OIDC token:\n%s", token.getPayload());
       return AuthResult.NOT_AUTHENTICATED;
     }
-    Optional<User> maybeUser = UserDao.loadUser(email);
+    Optional<User> maybeUser =
+        tm().transact(() -> tm().loadByKeyIfPresent(VKey.create(User.class, email)));
     if (maybeUser.isPresent()) {
-      return AuthResult.create(AuthLevel.USER, UserAuthInfo.create(maybeUser.get()));
+      return AuthResult.createUser(maybeUser.get());
     }
-    // TODO: implement caching so we don't have to look up the database for every request.
     logger.atInfo().log("No end user found for email address %s", email);
     if (serviceAccountEmails.stream().anyMatch(e -> e.equals(email))) {
-      return AuthResult.create(APP);
+      return AuthResult.createApp(email);
     }
     logger.atInfo().log("No service account found for email address %s", email);
     logger.atWarning().log(
@@ -112,11 +126,17 @@ public abstract class OidcTokenAuthenticationMechanism implements Authentication
 
   @VisibleForTesting
   public static void setAuthResultForTesting(@Nullable AuthResult authResult) {
+    checkState(
+        RegistryEnvironment.get() == RegistryEnvironment.UNITTEST,
+        "Explicitly setting auth result is only supported in tests");
     authResultForTesting = authResult;
   }
 
   @VisibleForTesting
   public static void unsetAuthResultForTesting() {
+    checkState(
+        RegistryEnvironment.get() == RegistryEnvironment.UNITTEST,
+        "Explicitly unsetting auth result is only supported in tests");
     authResultForTesting = null;
   }
 
@@ -124,6 +144,12 @@ public abstract class OidcTokenAuthenticationMechanism implements Authentication
   protected interface TokenExtractor {
     @Nullable
     String extract(HttpServletRequest request);
+  }
+
+  @FunctionalInterface
+  protected interface TokenVerifier {
+    @Nullable
+    JsonWebSignature verify(@Nullable String service, String rawToken) throws VerificationException;
   }
 
   /**
@@ -142,9 +168,9 @@ public abstract class OidcTokenAuthenticationMechanism implements Authentication
     @Inject
     protected IapOidcAuthenticationMechanism(
         @Config("allowedServiceAccountEmails") ImmutableSet<String> serviceAccountEmails,
-        @IapOidc TokenVerifier tokenVerifier,
-        @IapOidc TokenExtractor tokenExtractor) {
-      super(serviceAccountEmails, tokenVerifier, tokenExtractor);
+        @IapOidc TokenExtractor tokenExtractor,
+        @IapOidc TokenVerifier tokenVerifier) {
+      super(serviceAccountEmails, tokenExtractor, tokenVerifier);
     }
   }
 
@@ -153,15 +179,8 @@ public abstract class OidcTokenAuthenticationMechanism implements Authentication
    *
    * <p>If the endpoint is not behind IAP, we can try to authenticate the OIDC token supplied in the
    * request header directly. Ideally we would like all endpoints to be behind IAP, but being able
-   * to authenticate the token directly provides us with the flexibility to do away with OAuth-based
-   * {@link OAuthAuthenticationMechanism} that is tied to App Engine runtime without having to turn
-   * on IAP, which is an all-or-nothing switch for each GAE service (i.e. no way to turn it on only
-   * for certain GAE endpoints).
-   *
-   * <p>Note that this mechanism will try to first extract the token under the "proxy-authorization"
-   * header, before trying "authorization". This is because currently the GAE OAuth service always
-   * uses "authorization", and we would like to provide a way for both auth mechanisms to be working
-   * at the same time for the same request.
+   * to authenticate the token directly provides us with some extra flexibility that comes in handy,
+   * at least during the migration to GKE.
    *
    * @see <a href=https://datatracker.ietf.org/doc/html/rfc6750>Bearer Token Usage</a>
    */
@@ -170,9 +189,9 @@ public abstract class OidcTokenAuthenticationMechanism implements Authentication
     @Inject
     protected RegularOidcAuthenticationMechanism(
         @Config("allowedServiceAccountEmails") ImmutableSet<String> serviceAccountEmails,
-        @RegularOidc TokenVerifier tokenVerifier,
-        @RegularOidc TokenExtractor tokenExtractor) {
-      super(serviceAccountEmails, tokenVerifier, tokenExtractor);
+        @RegularOidc TokenExtractor tokenExtractor,
+        @RegularOidc TokenVerifier tokenVerifier) {
+      super(serviceAccountEmails, tokenExtractor, tokenVerifier);
     }
   }
 }

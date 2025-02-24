@@ -22,35 +22,68 @@ import static com.google.common.net.HttpHeaders.CONTENT_LENGTH;
 import static com.google.common.net.HttpHeaders.CONTENT_TYPE;
 import static java.nio.charset.StandardCharsets.UTF_8;
 
-import com.google.common.base.Strings;
 import com.google.common.io.ByteStreams;
 import com.google.common.net.MediaType;
+import java.io.ByteArrayInputStream;
 import java.io.DataOutputStream;
 import java.io.IOException;
+import java.io.InputStream;
+import java.net.HttpURLConnection;
 import java.net.URLConnection;
 import java.util.Random;
+import java.util.zip.GZIPInputStream;
+import org.apache.commons.compress.utils.IOUtils;
 
-/** Utilities for common functionality relating to {@link java.net.URLConnection}s. */
-public class UrlConnectionUtils {
+/** Utilities for common functionality relating to {@link URLConnection}s. */
+public final class UrlConnectionUtils {
 
-  /** Retrieves the response from the given connection as a byte array. */
-  public static byte[] getResponseBytes(URLConnection connection) throws IOException {
-    return ByteStreams.toByteArray(connection.getInputStream());
+  private UrlConnectionUtils() {}
+
+  /**
+   * Retrieves the response from the given connection as a byte array.
+   *
+   * <p>Note that in the event the response code is 4XX or 5XX, we use the error stream as any
+   * payload is included there.
+   *
+   * @see HttpURLConnection#getErrorStream()
+   */
+  public static byte[] getResponseBytes(HttpURLConnection connection) throws IOException {
+    int responseCode = connection.getResponseCode();
+    try (InputStream is =
+        responseCode < 400 ? connection.getInputStream() : connection.getErrorStream()) {
+      return ByteStreams.toByteArray(is);
+    } catch (NullPointerException e) {
+      return new byte[] {};
+    }
+  }
+
+  /** Decodes compressed data in GZIP format. */
+  public static byte[] gUnzipBytes(byte[] bytes) throws IOException {
+    try (GZIPInputStream inputStream = new GZIPInputStream(new ByteArrayInputStream(bytes))) {
+      return IOUtils.toByteArray(inputStream);
+    }
+  }
+
+  /** Checks whether {@code bytes} are GZIP encoded. */
+  public static boolean isGZipped(byte[] bytes) {
+    // See GzipOutputStream.writeHeader()
+    return (bytes.length > 2 && bytes[0] == (byte) GZIPInputStream.GZIP_MAGIC)
+        && (bytes[1] == (byte) (GZIPInputStream.GZIP_MAGIC >> 8));
   }
 
   /** Sets auth on the given connection with the given username/password. */
-  public static void setBasicAuth(URLConnection connection, String username, String password) {
+  public static void setBasicAuth(HttpURLConnection connection, String username, String password) {
     setBasicAuth(connection, String.format("%s:%s", username, password));
   }
 
   /** Sets auth on the given connection with the given string, formatted "username:password". */
-  public static void setBasicAuth(URLConnection connection, String usernameAndPassword) {
+  public static void setBasicAuth(HttpURLConnection connection, String usernameAndPassword) {
     String token = base64().encode(usernameAndPassword.getBytes(UTF_8));
     connection.setRequestProperty(AUTHORIZATION, "Basic " + token);
   }
 
   /** Sets the given byte[] payload on the given connection with a particular content type. */
-  public static void setPayload(URLConnection connection, byte[] bytes, String contentType)
+  public static void setPayload(HttpURLConnection connection, byte[] bytes, String contentType)
       throws IOException {
     connection.setRequestProperty(CONTENT_TYPE, contentType);
     connection.setDoOutput(true);
@@ -67,7 +100,7 @@ public class UrlConnectionUtils {
    * @see <a href="http://www.ietf.org/rfc/rfc2388.txt">RFC2388 - Returning Values from Forms</a>
    */
   public static void setPayloadMultipart(
-      URLConnection connection,
+      HttpURLConnection connection,
       String name,
       String filename,
       MediaType contentType,
@@ -99,6 +132,6 @@ public class UrlConnectionUtils {
     random.nextBytes(rand);
     // Boundary strings can be up to 70 characters long, so use 30 hyphens plus 32 random digits.
     // See https://tools.ietf.org/html/rfc2046#section-5.1.1
-    return Strings.repeat("-", 30) + base64().encode(rand);
+    return "-".repeat(30) + base64().encode(rand);
   }
 }

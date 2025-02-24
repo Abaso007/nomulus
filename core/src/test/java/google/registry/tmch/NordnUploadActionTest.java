@@ -25,9 +25,9 @@ import static google.registry.testing.DatabaseHelper.loadByKey;
 import static google.registry.testing.DatabaseHelper.loadRegistrar;
 import static google.registry.testing.DatabaseHelper.newDomain;
 import static google.registry.testing.DatabaseHelper.persistResource;
+import static jakarta.servlet.http.HttpServletResponse.SC_ACCEPTED;
+import static jakarta.servlet.http.HttpServletResponse.SC_INTERNAL_SERVER_ERROR;
 import static java.nio.charset.StandardCharsets.UTF_8;
-import static javax.servlet.http.HttpServletResponse.SC_ACCEPTED;
-import static javax.servlet.http.HttpServletResponse.SC_INTERNAL_SERVER_ERROR;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
@@ -71,19 +71,20 @@ import org.junit.jupiter.api.extension.RegisterExtension;
 class NordnUploadActionTest {
 
   private static final String CLAIMS_CSV =
-      "1,2010-05-04T10:11:12.000Z,2\n"
-          + "roid,domain-name,notice-id,registrar-id,registration-datetime,ack-datetime,"
-          + "application-datetime\n"
-          + "6-TLD,claims-landrush2.tld,landrush2tcn,88888,2010-05-03T10:11:12.000Z,"
-          + "2010-05-03T08:11:12.000Z\n"
-          + "8-TLD,claims-landrush1.tld,landrush1tcn,99999,2010-05-04T10:11:12.000Z,"
-          + "2010-05-04T09:11:12.000Z\n";
+      """
+          1,2010-05-04T10:11:12.000Z,2
+          roid,domain-name,notice-id,registrar-id,registration-datetime,ack-datetime,application-datetime
+          6-TLD,claims-landrush2.tld,landrush2tcn,88888,2010-05-03T10:11:12.000Z,2010-05-03T08:11:12.000Z
+          8-TLD,claims-landrush1.tld,landrush1tcn,99999,2010-05-04T10:11:12.000Z,2010-05-04T09:11:12.000Z
+          """;
 
   private static final String SUNRISE_CSV =
-      "1,2010-05-04T10:11:12.000Z,2\n"
-          + "roid,domain-name,SMD-id,registrar-id,registration-datetime,application-datetime\n"
-          + "2-TLD,sunrise2.tld,new-smdid,88888,2010-05-01T10:11:12.000Z\n"
-          + "4-TLD,sunrise1.tld,my-smdid,99999,2010-05-02T10:11:12.000Z\n";
+      """
+          1,2010-05-04T10:11:12.000Z,2
+          roid,domain-name,SMD-id,registrar-id,registration-datetime,application-datetime
+          2-TLD,sunrise2.tld,new-smdid,88888,2010-05-01T10:11:12.000Z
+          4-TLD,sunrise1.tld,my-smdid,99999,2010-05-02T10:11:12.000Z
+          """;
 
   private static final String LOCATION_URL = "http://trololol";
 
@@ -108,6 +109,8 @@ class NordnUploadActionTest {
   void beforeEach() throws Exception {
     when(httpUrlConnection.getInputStream())
         .thenReturn(new ByteArrayInputStream("Success".getBytes(UTF_8)));
+    when(httpUrlConnection.getErrorStream())
+        .thenReturn(new ByteArrayInputStream("Failure".getBytes(UTF_8)));
     when(httpUrlConnection.getResponseCode()).thenReturn(SC_ACCEPTED);
     when(httpUrlConnection.getHeaderField(LOCATION)).thenReturn("http://trololol");
     when(httpUrlConnection.getOutputStream()).thenReturn(connectionOutputStream);
@@ -235,6 +238,7 @@ class NordnUploadActionTest {
     assertThat(domain.getLordnPhase()).isEqualTo(LordnPhase.NONE);
   }
 
+  @SuppressWarnings("DirectInvocationOnMock")
   private void testRun(String phase, String domain1, String domain2, String csv) throws Exception {
     action.phase = phase;
     action.run();

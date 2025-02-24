@@ -1,4 +1,4 @@
-// Copyright 2023 The Nomulus Authors. All Rights Reserved.
+// Copyright 2024 The Nomulus Authors. All Rights Reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -17,6 +17,12 @@ import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { SettingsComponent } from './settings.component';
 import { MaterialModule } from '../material.module';
 import { BrowserAnimationsModule } from '@angular/platform-browser/animations';
+import { ActivatedRoute } from '@angular/router';
+import { AppModule, SelectedRegistrarModule } from '../app.module';
+import { BackendService } from '../shared/services/backend.service';
+import { provideHttpClient } from '@angular/common/http';
+import { provideHttpClientTesting } from '@angular/common/http/testing';
+import { AppRoutingModule } from '../app-routing.module';
 
 describe('SettingsComponent', () => {
   let component: SettingsComponent;
@@ -24,7 +30,19 @@ describe('SettingsComponent', () => {
 
   beforeEach(async () => {
     await TestBed.configureTestingModule({
-      imports: [MaterialModule, BrowserAnimationsModule],
+      imports: [
+        SelectedRegistrarModule,
+        MaterialModule,
+        BrowserAnimationsModule,
+        AppRoutingModule,
+        AppModule,
+      ],
+      providers: [
+        BackendService,
+        { provide: ActivatedRoute, useValue: {} as ActivatedRoute },
+        provideHttpClient(),
+        provideHttpClientTesting(),
+      ],
       declarations: [SettingsComponent],
     }).compileComponents();
 

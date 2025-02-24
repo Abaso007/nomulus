@@ -20,7 +20,6 @@ import static com.google.common.base.Strings.isNullOrEmpty;
 import static com.google.common.collect.ImmutableSet.toImmutableSet;
 import static google.registry.util.CollectionUtils.nullToEmpty;
 import static google.registry.util.PreconditionsUtils.checkArgumentPresent;
-import static java.nio.charset.StandardCharsets.UTF_8;
 
 import com.beust.jcommander.Parameter;
 import com.beust.jcommander.Parameters;
@@ -30,6 +29,7 @@ import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableSet;
 import google.registry.model.registrar.Registrar;
 import google.registry.model.registrar.RegistrarPoc;
+import google.registry.model.registrar.RegistrarPocBase;
 import google.registry.tools.params.OptionalPhoneNumberParameter;
 import google.registry.tools.params.PathParameter;
 import google.registry.tools.params.StringListParameter;
@@ -41,7 +41,6 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import javax.annotation.Nullable;
@@ -89,12 +88,6 @@ final class RegistrarPocCommand extends MutatingCommand {
 
   @Nullable
   @Parameter(
-      names = "--login_email",
-      description = "Console login email address. If not specified, --email will be used.")
-  String loginEmail;
-
-  @Nullable
-  @Parameter(
       names = "--registry_lock_email",
       description = "Email address used for registry lock confirmation emails")
   String registryLockEmail;
@@ -114,13 +107,6 @@ final class RegistrarPocCommand extends MutatingCommand {
       converter = OptionalPhoneNumberParameter.class,
       validateWith = OptionalPhoneNumberParameter.class)
   private Optional<String> fax;
-
-  @Nullable
-  @Parameter(
-      names = "--allow_console_access",
-      description = "Enable or disable access to the registrar console for this contact.",
-      arity = 1)
-  Boolean allowConsoleAccess;
 
   @Nullable
   @Parameter(
@@ -167,13 +153,13 @@ final class RegistrarPocCommand extends MutatingCommand {
   private static final ImmutableSet<Mode> MODES_REQUIRING_CONTACT_SYNC =
       ImmutableSet.of(Mode.CREATE, Mode.UPDATE, Mode.DELETE);
 
-  @Nullable private ImmutableSet<RegistrarPoc.Type> contactTypes;
+  @Nullable private ImmutableSet<RegistrarPocBase.Type> contactTypes;
 
   @Override
   protected void init() throws Exception {
     checkArgument(mainParameters.size() == 1,
         "Must specify exactly one client identifier: %s", ImmutableList.copyOf(mainParameters));
-    String clientId = mainParameters.get(0);
+    String clientId = mainParameters.getFirst();
     Registrar registrar =
         checkArgumentPresent(
             Registrar.loadByRegistrarId(clientId), "Registrar %s not found", clientId);
@@ -183,7 +169,7 @@ final class RegistrarPocCommand extends MutatingCommand {
     } else {
       contactTypes =
           contactTypeNames.stream()
-              .map(Enums.stringConverter(RegistrarPoc.Type.class))
+              .map(Enums.stringConverter(RegistrarPocBase.Type.class))
               .collect(toImmutableSet());
     }
     ImmutableSet<RegistrarPoc> contacts = registrar.getContacts();
@@ -193,16 +179,14 @@ final class RegistrarPocCommand extends MutatingCommand {
     }
     RegistrarPoc oldContact;
     switch (mode) {
-      case LIST:
-        listContacts(contacts);
-        break;
-      case CREATE:
+      case LIST -> listContacts(contacts);
+      case CREATE -> {
         stageEntityChange(null, createContact(registrar));
         if (visibleInDomainWhoisAsAbuse != null && visibleInDomainWhoisAsAbuse) {
           unsetOtherWhoisAbuseFlags(contacts, null);
         }
-        break;
-      case UPDATE:
+      }
+      case UPDATE -> {
         oldContact =
             checkNotNull(
                 contactsMap.get(checkNotNull(email, "--email is required when --mode=UPDATE")),
@@ -218,8 +202,8 @@ final class RegistrarPocCommand extends MutatingCommand {
         if (visibleInDomainWhoisAsAbuse != null && visibleInDomainWhoisAsAbuse) {
           unsetOtherWhoisAbuseFlags(contacts, oldContact.getEmailAddress());
         }
-        break;
-      case DELETE:
+      }
+      case DELETE -> {
         oldContact =
             checkNotNull(
                 contactsMap.get(checkNotNull(email, "--email is required when --mode=DELETE")),
@@ -229,9 +213,8 @@ final class RegistrarPocCommand extends MutatingCommand {
             !oldContact.getVisibleInDomainWhoisAsAbuse(),
             "Cannot delete the domain WHOIS abuse contact; set the flag on another contact first");
         stageEntityChange(oldContact, null);
-        break;
-      default:
-        throw new AssertionError();
+      }
+      default -> throw new AssertionError();
     }
     if (MODES_REQUIRING_CONTACT_SYNC.contains(mode)) {
       stageEntityChange(registrar, registrar.asBuilder().setContactsRequireSyncing(true).build());
@@ -243,7 +226,7 @@ final class RegistrarPocCommand extends MutatingCommand {
     for (RegistrarPoc c : contacts) {
       result.add(c.toStringMultilinePlainText());
     }
-    Files.write(output, Joiner.on('\n').join(result).getBytes(UTF_8));
+    Files.writeString(output, Joiner.on('\n').join(result));
   }
 
   private RegistrarPoc createContact(Registrar registrar) {
@@ -264,9 +247,6 @@ final class RegistrarPocCommand extends MutatingCommand {
     }
     builder.setTypes(nullToEmpty(contactTypes));
 
-    if (Objects.equals(allowConsoleAccess, Boolean.TRUE)) {
-      builder.setLoginEmailAddress(loginEmail == null ? email : loginEmail);
-    }
     if (visibleInWhoisAsAdmin != null) {
       builder.setVisibleInWhoisAsAdmin(visibleInWhoisAsAdmin);
     }
@@ -310,13 +290,6 @@ final class RegistrarPocCommand extends MutatingCommand {
     }
     if (visibleInDomainWhoisAsAbuse != null) {
       builder.setVisibleInDomainWhoisAsAbuse(visibleInDomainWhoisAsAbuse);
-    }
-    if (allowConsoleAccess != null) {
-      if (allowConsoleAccess.equals(Boolean.TRUE)) {
-        builder.setLoginEmailAddress(loginEmail == null ? email : loginEmail);
-      } else {
-        builder.setLoginEmailAddress(null);
-      }
     }
     if (allowedToSetRegistryLockPassword != null) {
       builder.setAllowedToSetRegistryLockPassword(allowedToSetRegistryLockPassword);

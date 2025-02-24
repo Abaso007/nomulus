@@ -16,22 +16,27 @@ package google.registry.request;
 
 import static com.google.common.base.Preconditions.checkNotNull;
 import static com.google.common.net.MediaType.PLAIN_TEXT_UTF_8;
-import static javax.servlet.http.HttpServletResponse.SC_FORBIDDEN;
-import static javax.servlet.http.HttpServletResponse.SC_METHOD_NOT_ALLOWED;
-import static javax.servlet.http.HttpServletResponse.SC_NOT_FOUND;
+import static jakarta.servlet.http.HttpServletResponse.SC_FORBIDDEN;
+import static jakarta.servlet.http.HttpServletResponse.SC_INTERNAL_SERVER_ERROR;
+import static jakarta.servlet.http.HttpServletResponse.SC_METHOD_NOT_ALLOWED;
+import static jakarta.servlet.http.HttpServletResponse.SC_NOT_FOUND;
 
 import com.google.common.flogger.FluentLogger;
+import google.registry.config.RegistryConfig;
+import google.registry.request.Action.GkeService;
 import google.registry.request.auth.AuthResult;
 import google.registry.request.auth.RequestAuthenticator;
 import google.registry.util.NonFinalForTesting;
+import google.registry.util.RegistryEnvironment;
 import google.registry.util.SystemClock;
 import google.registry.util.TypeUtils.TypeInstantiator;
+import jakarta.servlet.http.HttpServletRequest;
+import jakarta.servlet.http.HttpServletResponse;
 import java.io.IOException;
+import java.util.Objects;
 import java.util.Optional;
 import javax.annotation.Nullable;
 import javax.inject.Provider;
-import javax.servlet.http.HttpServletRequest;
-import javax.servlet.http.HttpServletResponse;
 import org.joda.time.DateTime;
 import org.joda.time.Duration;
 
@@ -41,10 +46,11 @@ import org.joda.time.Duration;
  * <p>This class creates an HTTP request processor from a Dagger component. It routes requests from
  * your servlet to an {@link Action @Action} annotated handler class.
  *
- * <h3>Component Definition</h3>
+ * <h2>Component Definition</h2>
  *
- * <p>Action instances are supplied on a per-request basis by invoking the methods on {@code C}.
- * For example:
+ * <p>Action instances are supplied on a per-request basis by invoking the methods on {@code C}. For
+ * example:
+ *
  * <pre>
  * {@literal @Component}
  * interface ServerComponent {
@@ -52,12 +58,13 @@ import org.joda.time.Duration;
  * }</pre>
  *
  * <p>The rules for component methods are as follows:
+ *
  * <ol>
- * <li>Methods whose raw return type does not implement {@code Runnable} will be ignored
- * <li>Methods whose raw return type does not have an {@code @Action} annotation are ignored
+ *   <li>Methods whose raw return type does not implement {@code Runnable} will be ignored
+ *   <li>Methods whose raw return type does not have an {@code @Action} annotation are ignored
  * </ol>
  *
- * <h3>Security Features</h3>
+ * <h2>Security Features</h2>
  *
  * @param <C> request component type
  */
@@ -92,14 +99,12 @@ public class RequestHandler<C> {
   }
 
   /** Creates a new RequestHandler with an explicit component class for test purposes. */
-  public static <C> RequestHandler<C> createForTest(
+  public static <C> RequestHandler<C> create(
       Class<C> component,
       Provider<? extends RequestComponentBuilder<C>> requestComponentBuilderProvider,
       RequestAuthenticator requestAuthenticator) {
     return new RequestHandler<>(
-        checkNotNull(component),
-        requestComponentBuilderProvider,
-        requestAuthenticator);
+        checkNotNull(component), requestComponentBuilderProvider, requestAuthenticator);
   }
 
   private RequestHandler(
@@ -129,10 +134,23 @@ public class RequestHandler<C> {
     }
     String path = req.getRequestURI();
     Optional<Route> route = router.route(path);
-    if (!route.isPresent()) {
+    if (route.isEmpty()) {
       logger.atInfo().log("No action found for: %s", path);
       rsp.sendError(SC_NOT_FOUND);
       return;
+    }
+    if (RegistryEnvironment.isOnJetty()) {
+      GkeService service = Action.ServiceGetter.get(route.get().action());
+      String expectedDomain = RegistryConfig.getServiceUrl(service).getHost();
+      String actualDomain = req.getServerName();
+      // If the hostname is "localhost", it must have come from the sidecar proxy.
+      if (!Objects.equals("localhost", actualDomain)
+          && !Objects.equals(actualDomain, expectedDomain)) {
+        logger.atWarning().log(
+            "Actual domain %s does not match expected domain %s", actualDomain, expectedDomain);
+        rsp.sendError(SC_NOT_FOUND);
+        return;
+      }
     }
     if (!route.get().isMethodAllowed(method)) {
       logger.atWarning().log("Method %s not allowed for: %s", method, path);
@@ -141,7 +159,7 @@ public class RequestHandler<C> {
     }
     Optional<AuthResult> authResult =
         requestAuthenticator.authorize(route.get().action().auth().authSettings(), req);
-    if (!authResult.isPresent()) {
+    if (authResult.isEmpty()) {
       rsp.sendError(SC_FORBIDDEN, "Not authorized");
       return;
     }
@@ -162,6 +180,10 @@ public class RequestHandler<C> {
     } catch (HttpException e) {
       e.send(rsp);
       success = false;
+    } catch (Exception e) {
+      rsp.setStatus(SC_INTERNAL_SERVER_ERROR);
+      rsp.getWriter().write("Internal server error, please try again later");
+      logger.atSevere().withCause(e).log("Encountered internal server error");
     } finally {
       requestMetrics.record(
           new Duration(startTime, clock.nowUtc()),

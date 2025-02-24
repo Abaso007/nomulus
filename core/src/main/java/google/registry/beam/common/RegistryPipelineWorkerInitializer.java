@@ -19,10 +19,10 @@ import static google.registry.beam.common.RegistryPipelineOptions.toRegistryPipe
 import com.google.auto.service.AutoService;
 import com.google.common.flogger.FluentLogger;
 import dagger.Lazy;
-import google.registry.config.RegistryEnvironment;
-import google.registry.config.SystemPropertySetter;
 import google.registry.persistence.transaction.JpaTransactionManager;
 import google.registry.persistence.transaction.TransactionManagerFactory;
+import google.registry.util.RegistryEnvironment;
+import google.registry.util.SystemPropertySetter;
 import org.apache.beam.sdk.harness.JvmInitializer;
 import org.apache.beam.sdk.options.PipelineOptions;
 
@@ -50,16 +50,17 @@ public class RegistryPipelineWorkerInitializer implements JvmInitializer {
     environment.setup();
     RegistryPipelineComponent registryPipelineComponent =
         toRegistryPipelineComponent(registryOptions);
-    Lazy<JpaTransactionManager> transactionManagerLazy;
-    switch (registryOptions.getJpaTransactionManagerType()) {
-      case READ_ONLY_REPLICA:
-        transactionManagerLazy =
-            registryPipelineComponent.getReadOnlyReplicaJpaTransactionManager();
-        break;
-      case REGULAR:
-      default:
-        transactionManagerLazy = registryPipelineComponent.getJpaTransactionManager();
-    }
+    Lazy<JpaTransactionManager> transactionManagerLazy =
+        switch (registryOptions.getJpaTransactionManagerType()) {
+          case READ_ONLY_REPLICA ->
+              registryPipelineComponent.getReadOnlyReplicaJpaTransactionManager();
+          case REGULAR -> registryPipelineComponent.getJpaTransactionManager();
+          default ->
+              throw new IllegalStateException(
+                  String.format(
+                      "Unknown JPA transaction manager type: %s",
+                      registryOptions.getJpaTransactionManagerType()));
+        };
     TransactionManagerFactory.setJpaTmOnBeamWorker(transactionManagerLazy::get);
     SystemPropertySetter.PRODUCTION_IMPL.setProperty(PROPERTY, "true");
   }

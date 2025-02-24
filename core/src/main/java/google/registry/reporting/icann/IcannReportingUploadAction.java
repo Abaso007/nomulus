@@ -17,7 +17,7 @@ package google.registry.reporting.icann;
 import static com.google.common.net.MediaType.PLAIN_TEXT_UTF_8;
 import static google.registry.persistence.transaction.TransactionManagerFactory.tm;
 import static google.registry.request.Action.Method.POST;
-import static javax.servlet.http.HttpServletResponse.SC_OK;
+import static jakarta.servlet.http.HttpServletResponse.SC_OK;
 
 import com.google.cloud.storage.BlobId;
 import com.google.common.collect.ImmutableMap;
@@ -35,6 +35,7 @@ import google.registry.model.tld.Tld.TldType;
 import google.registry.model.tld.Tlds;
 import google.registry.persistence.VKey;
 import google.registry.request.Action;
+import google.registry.request.Action.GaeService;
 import google.registry.request.HttpException.ServiceUnavailableException;
 import google.registry.request.Response;
 import google.registry.request.auth.Auth;
@@ -42,13 +43,13 @@ import google.registry.request.lock.LockHandler;
 import google.registry.util.Clock;
 import google.registry.util.EmailMessage;
 import google.registry.util.Retrier;
+import jakarta.mail.internet.InternetAddress;
 import java.io.IOException;
 import java.io.InputStream;
 import java.util.Map;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 import javax.inject.Inject;
-import javax.mail.internet.InternetAddress;
 import org.joda.time.DateTime;
 import org.joda.time.Duration;
 
@@ -63,14 +64,14 @@ import org.joda.time.Duration;
  * <p>Parameters:
  *
  * <p>subdir: the subdirectory of gs://[project-id]-reporting/ to retrieve reports from. For
- * example: "manual/dir" means reports will be stored under gs://[project-id]-reporting/manual/dir.
+ * example, "manual/dir" means reports will be stored under gs://[project-id]-reporting/manual/dir.
  * Defaults to "icann/monthly/[last month in yyyy-MM format]".
  */
 @Action(
-    service = Action.Service.BACKEND,
+    service = GaeService.BACKEND,
     path = IcannReportingUploadAction.PATH,
     method = POST,
-    auth = Auth.AUTH_API_ADMIN)
+    auth = Auth.AUTH_ADMIN)
 public final class IcannReportingUploadAction implements Runnable {
 
   static final String PATH = "/_dr/task/icannReportingUpload";
@@ -86,7 +87,6 @@ public final class IcannReportingUploadAction implements Runnable {
   @Inject IcannHttpReporter icannReporter;
   @Inject Retrier retrier;
   @Inject Response response;
-  @Inject @Config("gSuiteOutgoingEmailAddress") InternetAddress sender;
 
   @Inject
   @Config("newAlertRecipientEmailAddress")
@@ -98,6 +98,17 @@ public final class IcannReportingUploadAction implements Runnable {
 
   @Inject
   IcannReportingUploadAction() {}
+
+  /**
+   * Get the scheduled time for the next month of the given {@link DateTime}.
+   *
+   * <p>The scheduled time is always the second day of next month at 10AM UTC. This is because the
+   * staging action is scheduled to run at 9AM UTC on that day, and there is no reason to run the
+   * upload job before that. See {@code icannReportingStaging} in {@code cloud-scheduler.xml}.
+   */
+  private static DateTime getScheduledTimeForCurrentMonth(DateTime time) {
+    return time.withDayOfMonth(2).withHourOfDay(10).withMinuteOfHour(0).plusMonths(1);
+  }
 
   @Override
   public void run() {
@@ -145,7 +156,7 @@ public final class IcannReportingUploadAction implements Runnable {
                   + " exist.",
               cursorType, tldStr, filename, gcsFilename.getName(), gcsFilename.getBucket());
       if (clock.nowUtc().dayOfMonth().get() == 1) {
-        logger.atInfo().log(logMessage + " This report may not have been staged yet.");
+        logger.atInfo().log("%s This report may not have been staged yet.", logMessage);
       } else {
         logger.atSevere().log(logMessage);
       }
@@ -171,12 +182,10 @@ public final class IcannReportingUploadAction implements Runnable {
     if (success) {
       Cursor newCursor =
           Cursor.createScoped(
-              cursorType,
-              cursorTime.withTimeAtStartOfDay().withDayOfMonth(1).plusMonths(1),
-              Tld.get(tldStr));
-      // In order to keep the transactions short-lived, we load all of the cursors in a single
+              cursorType, getScheduledTimeForCurrentMonth(cursorTime), Tld.get(tldStr));
+      // In order to keep the transactions short-lived, we load all the cursors in a single
       // transaction then later use per-cursor transactions when checking + saving the cursors. We
-      // run behind a lock so the cursors shouldn't be changed, but double check to be sure.
+      // run behind a lock, so the cursors shouldn't be changed, but double check to be sure.
       success =
           tm().transact(
                   () -> {
@@ -236,7 +245,7 @@ public final class IcannReportingUploadAction implements Runnable {
 
   /**
    * Return a map with the Cursor and scope for each key in the keyMap. If the key from the keyMap
-   * does not have an existing cursor, create a new cursor with a default cursorTime of the first of
+   * does not have an existing cursor, create a new cursor with a default cursorTime at the first of
    * next month.
    */
   private ImmutableMap<Cursor, String> defaultNullCursorsToNextMonthAndAddToMap(
@@ -246,15 +255,13 @@ public final class IcannReportingUploadAction implements Runnable {
     ImmutableMap.Builder<Cursor, String> cursors = new ImmutableMap.Builder<>();
     keyMap.forEach(
         (key, registry) -> {
-          // Cursor time is defaulted to the first of next month since a new tld will not yet have a
-          // report staged for upload.
+          // Cursor time is defaulted to 10AM on the second day of next month since a new tld will
+          // not yet have a report staged for upload.
           Cursor cursor =
               cursorMap.getOrDefault(
                   key,
                   Cursor.createScoped(
-                      type,
-                      clock.nowUtc().withDayOfMonth(1).withTimeAtStartOfDay().plusMonths(1),
-                      registry));
+                      type, getScheduledTimeForCurrentMonth(clock.nowUtc()), registry));
           if (!cursorMap.containsValue(cursor)) {
             tm().put(cursor);
           }
@@ -279,7 +286,7 @@ public final class IcannReportingUploadAction implements Runnable {
   }
 
   private void emailUploadResults(ImmutableMap<String, Boolean> reportSummary) {
-    if (reportSummary.size() == 0) {
+    if (reportSummary.isEmpty()) {
       logger.atInfo().log("No uploads were attempted today; skipping notification email.");
       return;
     }
@@ -297,7 +304,7 @@ public final class IcannReportingUploadAction implements Runnable {
                     (e) ->
                         String.format("%s - %s", e.getKey(), e.getValue() ? "SUCCESS" : "FAILURE"))
                 .collect(Collectors.joining("\n")));
-    gmailClient.sendEmail(EmailMessage.create(subject, body, recipient, sender));
+    gmailClient.sendEmail(EmailMessage.create(subject, body, recipient));
   }
 
   private byte[] readBytesFromGcs(BlobId reportFilename) throws IOException {

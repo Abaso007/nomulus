@@ -20,6 +20,7 @@ import static com.google.common.collect.Sets.difference;
 import static com.google.common.collect.Sets.union;
 import static google.registry.config.RegistryConfig.getEppResourceCachingDuration;
 import static google.registry.config.RegistryConfig.getEppResourceMaxCachedEntries;
+import static google.registry.persistence.transaction.TransactionManagerFactory.replicaTm;
 import static google.registry.persistence.transaction.TransactionManagerFactory.tm;
 import static google.registry.util.CollectionUtils.nullToEmpty;
 import static google.registry.util.CollectionUtils.nullToEmptyImmutableCopy;
@@ -36,16 +37,18 @@ import google.registry.model.eppcommon.StatusValue;
 import google.registry.model.transfer.TransferData;
 import google.registry.persistence.VKey;
 import google.registry.util.NonFinalForTesting;
+import jakarta.persistence.Access;
+import jakarta.persistence.AccessType;
+import jakarta.persistence.AttributeOverride;
+import jakarta.persistence.Column;
+import jakarta.persistence.EnumType;
+import jakarta.persistence.Enumerated;
+import jakarta.persistence.MappedSuperclass;
+import jakarta.persistence.Transient;
 import java.time.Duration;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
-import javax.persistence.Access;
-import javax.persistence.AccessType;
-import javax.persistence.AttributeOverride;
-import javax.persistence.Column;
-import javax.persistence.MappedSuperclass;
-import javax.persistence.Transient;
 import org.joda.time.DateTime;
 
 /** An EPP entity object (i.e. a domain, contact, or host). */
@@ -132,7 +135,9 @@ public abstract class EppResource extends UpdateAutoTimestampEntity implements B
   @Expose DateTime lastEppUpdateTime;
 
   /** Status values associated with this resource. */
-  @Expose Set<StatusValue> statuses;
+  @Enumerated(EnumType.STRING)
+  @Expose
+  Set<StatusValue> statuses;
 
   public String getRepoId() {
     return repoId;
@@ -353,17 +358,17 @@ public abstract class EppResource extends UpdateAutoTimestampEntity implements B
   }
 
   static final CacheLoader<VKey<? extends EppResource>, EppResource> CACHE_LOADER =
-      new CacheLoader<VKey<? extends EppResource>, EppResource>() {
+      new CacheLoader<>() {
 
         @Override
         public EppResource load(VKey<? extends EppResource> key) {
-          return tm().reTransact(() -> tm().loadByKey(key));
+          return replicaTm().reTransact(() -> replicaTm().loadByKey(key));
         }
 
         @Override
-        public Map<VKey<? extends EppResource>, EppResource> loadAll(
-            Iterable<? extends VKey<? extends EppResource>> keys) {
-          return tm().reTransact(() -> tm().loadByKeys(keys));
+        public Map<? extends VKey<? extends EppResource>, ? extends EppResource> loadAll(
+            Set<? extends VKey<? extends EppResource>> keys) {
+          return replicaTm().reTransact(() -> replicaTm().loadByKeys(keys));
         }
       };
 

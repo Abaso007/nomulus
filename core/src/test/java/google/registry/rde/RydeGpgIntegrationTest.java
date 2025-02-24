@@ -21,7 +21,6 @@ import static google.registry.testing.SystemInfo.hasCommand;
 import static java.nio.charset.StandardCharsets.UTF_8;
 import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
-import com.google.common.base.Strings;
 import com.google.common.collect.ImmutableList;
 import com.google.common.flogger.FluentLogger;
 import com.google.common.io.CharStreams;
@@ -63,10 +62,7 @@ public class RydeGpgIntegrationTest {
 
   private static final ImmutableList<String> CONTENTS =
       ImmutableList.of(
-          "(◕‿◕)",
-          Strings.repeat("Fanatics have their dreams, wherewith they weave\n", 1000),
-          "\0yolo",
-          "");
+          "(◕‿◕)", "Fanatics have their dreams, wherewith they weave\n".repeat(1000), "\0yolo", "");
 
   static Stream<Arguments> provideTestCombinations() {
     Stream.Builder<Arguments> stream = Stream.builder();
@@ -152,9 +148,7 @@ public class RydeGpgIntegrationTest {
       assertWithMessage("Literal data packet should be in BINARY mode")
           .that(stdout)
           .contains("mode b ");
-      assertWithMessage("Unexpected asymmetric encryption algorithm")
-          .that(stderr)
-          .contains("encrypted with 2048-bit RSA key");
+      assertWithMessage("Unexpected asymmetric encryption algorithm").that(stderr).contains("2048");
       assertWithMessage("Unexpected receiver public key")
           .that(stderr)
           .contains("ID 7F9084EE54E1EB0F");

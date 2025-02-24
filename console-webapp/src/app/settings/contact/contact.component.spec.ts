@@ -1,4 +1,4 @@
-// Copyright 2023 The Nomulus Authors. All Rights Reserved.
+// Copyright 2024 The Nomulus Authors. All Rights Reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,10 +14,11 @@
 
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 
-import ContactComponent from './contact.component';
+import { provideHttpClient } from '@angular/common/http';
+import { provideHttpClientTesting } from '@angular/common/http/testing';
 import { MaterialModule } from 'src/app/material.module';
 import { BackendService } from 'src/app/shared/services/backend.service';
-import { HttpClientTestingModule } from '@angular/common/http/testing';
+import ContactComponent from './contact.component';
 
 describe('ContactComponent', () => {
   let component: ContactComponent;
@@ -26,8 +27,12 @@ describe('ContactComponent', () => {
   beforeEach(async () => {
     await TestBed.configureTestingModule({
       declarations: [ContactComponent],
-      imports: [HttpClientTestingModule, MaterialModule],
-      providers: [BackendService],
+      imports: [MaterialModule],
+      providers: [
+        BackendService,
+        provideHttpClient(),
+        provideHttpClientTesting(),
+      ],
     }).compileComponents();
     fixture = TestBed.createComponent(ContactComponent);
     component = fixture.componentInstance;

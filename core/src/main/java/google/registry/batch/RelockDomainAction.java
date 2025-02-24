@@ -19,8 +19,8 @@ import static com.google.common.collect.ImmutableSet.toImmutableSet;
 import static google.registry.persistence.transaction.TransactionManagerFactory.tm;
 import static google.registry.request.Action.Method.POST;
 import static google.registry.tools.LockOrUnlockDomainCommand.REGISTRY_LOCK_STATUSES;
-import static javax.servlet.http.HttpServletResponse.SC_NO_CONTENT;
-import static javax.servlet.http.HttpServletResponse.SC_OK;
+import static jakarta.servlet.http.HttpServletResponse.SC_NO_CONTENT;
+import static jakarta.servlet.http.HttpServletResponse.SC_OK;
 
 import com.google.common.collect.ImmutableSet;
 import com.google.common.flogger.FluentLogger;
@@ -35,25 +35,26 @@ import google.registry.model.registrar.RegistrarPoc;
 import google.registry.model.tld.RegistryLockDao;
 import google.registry.persistence.VKey;
 import google.registry.request.Action;
+import google.registry.request.Action.GaeService;
 import google.registry.request.Parameter;
 import google.registry.request.Response;
 import google.registry.request.auth.Auth;
 import google.registry.tools.DomainLockUtils;
 import google.registry.util.DateTimeUtils;
 import google.registry.util.EmailMessage;
+import jakarta.mail.internet.AddressException;
+import jakarta.mail.internet.InternetAddress;
 import java.util.Optional;
 import javax.inject.Inject;
-import javax.mail.internet.AddressException;
-import javax.mail.internet.InternetAddress;
 import org.joda.time.Duration;
 
 /** Task that re-locks a previously-Registry-Locked domain after a predetermined period of time. */
 @Action(
-    service = Action.Service.BACKEND,
+    service = GaeService.BACKEND,
     path = RelockDomainAction.PATH,
     method = POST,
     automaticallyPrintOk = true,
-    auth = Auth.AUTH_API_ADMIN)
+    auth = Auth.AUTH_ADMIN)
 public class RelockDomainAction implements Runnable {
 
   public static final String PATH = "/_dr/task/relockDomain";
@@ -66,11 +67,15 @@ public class RelockDomainAction implements Runnable {
   private static final Duration ONE_HOUR = Duration.standardHours(1);
 
   private static final String RELOCK_SUCCESS_EMAIL_TEMPLATE =
-      "The domain %s was successfully re-locked.\n\nPlease contact support at %s if you have any "
-          + "questions.";
+      """
+          The domain %s was successfully re-locked.
+
+          Please contact support at %s if you have any questions.""";
   private static final String RELOCK_NON_RETRYABLE_FAILURE_EMAIL_TEMPLATE =
-      "There was an error when automatically re-locking %s. Error message: %s\n\nPlease contact "
-          + "support at %s if you have any questions.";
+      """
+          There was an error when automatically re-locking %s. Error message: %s
+
+          Please contact support at %s if you have any questions.""";
   private static final String RELOCK_TRANSIENT_FAILURE_EMAIL_TEMPLATE =
       "There was an unexpected error when automatically re-locking %s. We will continue retrying "
           + "the lock for five hours. Please contact support at %s if you have any questions";
@@ -82,7 +87,6 @@ public class RelockDomainAction implements Runnable {
   private final long oldUnlockRevisionId;
   private final int previousAttempts;
   private final InternetAddress alertRecipientAddress;
-  private final InternetAddress gSuiteOutgoingEmailAddress;
   private final String supportEmail;
   private final GmailClient gmailClient;
   private final DomainLockUtils domainLockUtils;
@@ -93,7 +97,6 @@ public class RelockDomainAction implements Runnable {
       @Parameter(OLD_UNLOCK_REVISION_ID_PARAM) long oldUnlockRevisionId,
       @Parameter(PREVIOUS_ATTEMPTS_PARAM) int previousAttempts,
       @Config("newAlertRecipientEmailAddress") InternetAddress alertRecipientAddress,
-      @Config("gSuiteOutgoingEmailAddress") InternetAddress gSuiteOutgoingEmailAddress,
       @Config("supportEmail") String supportEmail,
       GmailClient gmailClient,
       DomainLockUtils domainLockUtils,
@@ -101,7 +104,6 @@ public class RelockDomainAction implements Runnable {
     this.oldUnlockRevisionId = oldUnlockRevisionId;
     this.previousAttempts = previousAttempts;
     this.alertRecipientAddress = alertRecipientAddress;
-    this.gSuiteOutgoingEmailAddress = gSuiteOutgoingEmailAddress;
     this.supportEmail = supportEmail;
     this.gmailClient = gmailClient;
     this.domainLockUtils = domainLockUtils;
@@ -217,7 +219,6 @@ public class RelockDomainAction implements Runnable {
             supportEmail);
     gmailClient.sendEmail(
         EmailMessage.newBuilder()
-            .setFrom(gSuiteOutgoingEmailAddress)
             .setBody(body)
             .setSubject(String.format("Error re-locking domain %s", oldLock.getDomainName()))
             .setRecipients(getEmailRecipients(oldLock.getRegistrarId()))
@@ -247,7 +248,6 @@ public class RelockDomainAction implements Runnable {
 
     gmailClient.sendEmail(
         EmailMessage.newBuilder()
-            .setFrom(gSuiteOutgoingEmailAddress)
             .setBody(body)
             .setSubject(String.format("Successful re-lock of domain %s", oldLock.getDomainName()))
             .setRecipients(getEmailRecipients(oldLock.getRegistrarId()))
@@ -266,7 +266,6 @@ public class RelockDomainAction implements Runnable {
             .build();
     gmailClient.sendEmail(
         EmailMessage.newBuilder()
-            .setFrom(gSuiteOutgoingEmailAddress)
             .setBody(body)
             .setSubject(String.format("Error re-locking domain %s", oldLock.getDomainName()))
             .setRecipients(allRecipients)
@@ -276,7 +275,6 @@ public class RelockDomainAction implements Runnable {
   private void sendUnknownRevisionIdAlertEmail() {
     gmailClient.sendEmail(
         EmailMessage.newBuilder()
-            .setFrom(gSuiteOutgoingEmailAddress)
             .setBody(String.format(RELOCK_UNKNOWN_ID_FAILURE_EMAIL_TEMPLATE, oldUnlockRevisionId))
             .setSubject("Error re-locking domain")
             .setRecipients(ImmutableSet.of(alertRecipientAddress))

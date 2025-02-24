@@ -18,18 +18,19 @@ reservedListNames: null
 premiumListName: null
 escrowEnabled: false
 dnsPaused: false
-addGracePeriodLength: 432000000
-anchorTenantAddGracePeriodLength: 2592000000
-autoRenewGracePeriodLength: 3888000000
-redemptionGracePeriodLength: 2592000000
-renewGracePeriodLength: 432000000
-transferGracePeriodLength: 432000000
-automaticTransferLength: 432000000
-pendingDeleteLength: 432000000
+addGracePeriodLength: "PT2592000S"
+anchorTenantAddGracePeriodLength: "PT2592000S"
+autoRenewGracePeriodLength: "PT2592000S"
+redemptionGracePeriodLength: "PT2592000S"
+renewGracePeriodLength: "PT2592000S"
+transferGracePeriodLength: "PT2592000S"
+automaticTransferLength: "PT2592000S"
+pendingDeleteLength: "PT2592000S"
 currency: "USD"
-createBillingCost:
-  currency: "USD"
-  amount: 25.00
+createBillingCostTransitions:
+  "1970-01-01T00:00:00.000Z":
+    currency: "USD"
+    amount: 25.00
 restoreBillingCost:
   currency: "USD"
   amount: 17.00

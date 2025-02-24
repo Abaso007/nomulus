@@ -18,7 +18,7 @@ import static google.registry.testing.DatabaseHelper.persistNewRegistrar;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import com.beust.jcommander.ParameterException;
-import google.registry.model.registrar.Registrar.Type;
+import google.registry.model.registrar.RegistrarBase.Type;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
@@ -90,7 +90,7 @@ class CheckDomainClaimsCommandTest extends EppToolCommandTestCase<CheckDomainCla
   @Test
   void testFailure_unknownFlag() {
     assertThrows(
-        ParameterException.class,
+        IllegalArgumentException.class,
         () -> runCommand("--client=NewRegistrar", "--unrecognized=foo", "example.tld"));
   }
 }

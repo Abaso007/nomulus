@@ -15,7 +15,6 @@
 package google.registry.flows.domain;
 
 import static com.google.common.truth.Truth.assertThat;
-import static com.google.common.truth.Truth8.assertThat;
 import static google.registry.flows.domain.DomainTransferFlowTestCase.persistWithPendingTransfer;
 import static google.registry.model.billing.BillingBase.RenewalPriceBehavior.DEFAULT;
 import static google.registry.model.billing.BillingBase.RenewalPriceBehavior.NONPREMIUM;
@@ -52,7 +51,6 @@ import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.ImmutableSortedMap;
 import com.google.common.collect.Iterables;
-import com.google.common.truth.Truth8;
 import google.registry.flows.EppException;
 import google.registry.flows.EppRequestSource;
 import google.registry.flows.FlowUtils.NotLoggedInException;
@@ -77,8 +75,8 @@ import google.registry.flows.domain.token.AllocationTokenFlowUtils.AllocationTok
 import google.registry.flows.domain.token.AllocationTokenFlowUtils.AllocationTokenNotValidForTldException;
 import google.registry.flows.domain.token.AllocationTokenFlowUtils.AlreadyRedeemedAllocationTokenException;
 import google.registry.flows.domain.token.AllocationTokenFlowUtils.InvalidAllocationTokenException;
-import google.registry.flows.domain.token.AllocationTokenFlowUtils.MissingRemoveDomainTokenOnBulkPricingDomainException;
-import google.registry.flows.domain.token.AllocationTokenFlowUtils.RemoveDomainTokenOnNonBulkPricingDomainException;
+import google.registry.flows.domain.token.AllocationTokenFlowUtils.MissingRemoveBulkPricingTokenOnBulkPricingDomainException;
+import google.registry.flows.domain.token.AllocationTokenFlowUtils.RemoveBulkPricingTokenOnNonBulkPricingDomainException;
 import google.registry.flows.exceptions.ResourceStatusProhibitsOperationException;
 import google.registry.model.billing.BillingBase.Flag;
 import google.registry.model.billing.BillingBase.Reason;
@@ -95,7 +93,7 @@ import google.registry.model.domain.token.AllocationToken.TokenStatus;
 import google.registry.model.eppcommon.StatusValue;
 import google.registry.model.poll.PollMessage;
 import google.registry.model.registrar.Registrar;
-import google.registry.model.registrar.Registrar.State;
+import google.registry.model.registrar.RegistrarBase.State;
 import google.registry.model.reporting.DomainTransactionRecord;
 import google.registry.model.reporting.DomainTransactionRecord.TransactionReportField;
 import google.registry.model.reporting.HistoryEntry;
@@ -1034,7 +1032,8 @@ class DomainRenewFlowTest extends ResourceFlowTestCase<DomainRenewFlow, Domain> 
         Tld.get("tld")
             .asBuilder()
             .setCurrency(EUR)
-            .setCreateBillingCost(Money.of(EUR, 13))
+            .setCreateBillingCostTransitions(
+                ImmutableSortedMap.of(START_OF_TIME, Money.of(EUR, 13)))
             .setRestoreBillingCost(Money.of(EUR, 11))
             .setRenewBillingCostTransitions(ImmutableSortedMap.of(START_OF_TIME, Money.of(EUR, 7)))
             .setEapFeeSchedule(ImmutableSortedMap.of(START_OF_TIME, Money.zero(EUR)))
@@ -1053,7 +1052,8 @@ class DomainRenewFlowTest extends ResourceFlowTestCase<DomainRenewFlow, Domain> 
         Tld.get("tld")
             .asBuilder()
             .setCurrency(EUR)
-            .setCreateBillingCost(Money.of(EUR, 13))
+            .setCreateBillingCostTransitions(
+                ImmutableSortedMap.of(START_OF_TIME, Money.of(EUR, 13)))
             .setRestoreBillingCost(Money.of(EUR, 11))
             .setRenewBillingCostTransitions(ImmutableSortedMap.of(START_OF_TIME, Money.of(EUR, 7)))
             .setEapFeeSchedule(ImmutableSortedMap.of(START_OF_TIME, Money.zero(EUR)))
@@ -1072,7 +1072,8 @@ class DomainRenewFlowTest extends ResourceFlowTestCase<DomainRenewFlow, Domain> 
         Tld.get("tld")
             .asBuilder()
             .setCurrency(EUR)
-            .setCreateBillingCost(Money.of(EUR, 13))
+            .setCreateBillingCostTransitions(
+                ImmutableSortedMap.of(START_OF_TIME, Money.of(EUR, 13)))
             .setRestoreBillingCost(Money.of(EUR, 11))
             .setRenewBillingCostTransitions(ImmutableSortedMap.of(START_OF_TIME, Money.of(EUR, 7)))
             .setEapFeeSchedule(ImmutableSortedMap.of(START_OF_TIME, Money.zero(EUR)))
@@ -1115,7 +1116,8 @@ class DomainRenewFlowTest extends ResourceFlowTestCase<DomainRenewFlow, Domain> 
         Tld.get("tld")
             .asBuilder()
             .setCurrency(JPY)
-            .setCreateBillingCost(Money.ofMajor(JPY, 800))
+            .setCreateBillingCostTransitions(
+                ImmutableSortedMap.of(START_OF_TIME, Money.ofMajor(JPY, 800)))
             .setEapFeeSchedule(ImmutableSortedMap.of(START_OF_TIME, Money.ofMajor(JPY, 800)))
             .setRenewBillingCostTransitions(
                 ImmutableSortedMap.of(START_OF_TIME, Money.ofMajor(JPY, 800)))
@@ -1255,9 +1257,11 @@ class DomainRenewFlowTest extends ResourceFlowTestCase<DomainRenewFlow, Domain> 
             new AllocationToken.Builder()
                 .setToken("abc123")
                 .setTokenType(BULK_PRICING)
+                .setDiscountFraction(1.0)
                 .setAllowedRegistrarIds(ImmutableSet.of("TheRegistrar"))
                 .setAllowedTlds(ImmutableSet.of("tld"))
                 .setRenewalPriceBehavior(SPECIFIED)
+                .setRenewalPrice(Money.of(USD, 0))
                 .setAllowedEppActions(ImmutableSet.of(CommandName.CREATE))
                 .build());
     persistDomain();
@@ -1276,20 +1280,23 @@ class DomainRenewFlowTest extends ResourceFlowTestCase<DomainRenewFlow, Domain> 
         ImmutableMap.of("DOMAIN", "example.tld", "YEARS", "2", "TOKEN", "token"));
 
     EppException thrown =
-        assertThrows(MissingRemoveDomainTokenOnBulkPricingDomainException.class, this::runFlow);
+        assertThrows(
+            MissingRemoveBulkPricingTokenOnBulkPricingDomainException.class, this::runFlow);
     assertAboutEppExceptions().that(thrown).marshalsToXml();
   }
 
   @Test
-  void testFailsToRenewBulkPricingDomainNoRemoveDomainToken() throws Exception {
+  void testFailsToRenewBulkPricingDomainNoRemoveBulkPricingToken() throws Exception {
     AllocationToken token =
         persistResource(
             new AllocationToken.Builder()
                 .setToken("abc123")
                 .setTokenType(BULK_PRICING)
+                .setDiscountFraction(1.0)
                 .setAllowedRegistrarIds(ImmutableSet.of("TheRegistrar"))
                 .setAllowedTlds(ImmutableSet.of("tld"))
                 .setRenewalPriceBehavior(SPECIFIED)
+                .setRenewalPrice(Money.of(USD, 0))
                 .setAllowedEppActions(ImmutableSet.of(CommandName.CREATE))
                 .build());
     persistDomain();
@@ -1299,33 +1306,36 @@ class DomainRenewFlowTest extends ResourceFlowTestCase<DomainRenewFlow, Domain> 
     setEppInput("domain_renew.xml", ImmutableMap.of("DOMAIN", "example.tld", "YEARS", "5"));
 
     EppException thrown =
-        assertThrows(MissingRemoveDomainTokenOnBulkPricingDomainException.class, this::runFlow);
+        assertThrows(
+            MissingRemoveBulkPricingTokenOnBulkPricingDomainException.class, this::runFlow);
     assertAboutEppExceptions().that(thrown).marshalsToXml();
   }
 
   @Test
-  void testFailsToRenewNonBulkPricingDomainWithRemoveDomainToken() throws Exception {
+  void testFailsToRenewNonBulkPricingDomainWithRemoveBulkPricingToken() throws Exception {
     persistDomain();
 
     setEppInput(
         "domain_renew_allocationtoken.xml",
-        ImmutableMap.of("DOMAIN", "example.tld", "YEARS", "2", "TOKEN", "__REMOVEDOMAIN__"));
+        ImmutableMap.of("DOMAIN", "example.tld", "YEARS", "2", "TOKEN", "__REMOVE_BULK_PRICING__"));
 
     EppException thrown =
-        assertThrows(RemoveDomainTokenOnNonBulkPricingDomainException.class, this::runFlow);
+        assertThrows(RemoveBulkPricingTokenOnNonBulkPricingDomainException.class, this::runFlow);
     assertAboutEppExceptions().that(thrown).marshalsToXml();
   }
 
   @Test
-  void testSuccesfullyAppliesRemoveDomainToken() throws Exception {
+  void testSuccesfullyAppliesRemoveBulkPricingToken() throws Exception {
     AllocationToken token =
         persistResource(
             new AllocationToken.Builder()
                 .setToken("abc123")
                 .setTokenType(BULK_PRICING)
+                .setDiscountFraction(1.0)
                 .setAllowedRegistrarIds(ImmutableSet.of("TheRegistrar"))
                 .setAllowedTlds(ImmutableSet.of("tld"))
                 .setRenewalPriceBehavior(SPECIFIED)
+                .setRenewalPrice(Money.of(USD, 0))
                 .setAllowedEppActions(ImmutableSet.of(CommandName.CREATE))
                 .build());
     persistDomain(SPECIFIED, Money.of(USD, 2));
@@ -1333,7 +1343,7 @@ class DomainRenewFlowTest extends ResourceFlowTestCase<DomainRenewFlow, Domain> 
         reloadResourceByForeignKey().asBuilder().setCurrentBulkToken(token.createVKey()).build());
     setEppInput(
         "domain_renew_allocationtoken.xml",
-        ImmutableMap.of("DOMAIN", "example.tld", "YEARS", "2", "TOKEN", "__REMOVEDOMAIN__"));
+        ImmutableMap.of("DOMAIN", "example.tld", "YEARS", "2", "TOKEN", "__REMOVE_BULK_PRICING__"));
 
     doSuccessfulTest(
         "domain_renew_response.xml",
@@ -1343,19 +1353,21 @@ class DomainRenewFlowTest extends ResourceFlowTestCase<DomainRenewFlow, Domain> 
     // We still need to verify that the bulk token is removed as it's not being tested as a part of
     // doSuccessfulTest
     Domain domain = reloadResourceByForeignKey();
-    Truth8.assertThat(domain.getCurrentBulkToken()).isEmpty();
+    assertThat(domain.getCurrentBulkToken()).isEmpty();
   }
 
   @Test
-  void testDryRunRemoveDomainToken() throws Exception {
+  void testDryRunRemoveBulkPricingToken() throws Exception {
     AllocationToken token =
         persistResource(
             new AllocationToken.Builder()
                 .setToken("abc123")
                 .setTokenType(BULK_PRICING)
+                .setDiscountFraction(1.0)
                 .setAllowedRegistrarIds(ImmutableSet.of("TheRegistrar"))
                 .setAllowedTlds(ImmutableSet.of("tld"))
                 .setRenewalPriceBehavior(SPECIFIED)
+                .setRenewalPrice(Money.of(USD, 0))
                 .setAllowedEppActions(ImmutableSet.of(CommandName.CREATE))
                 .build());
     persistDomain(SPECIFIED, Money.of(USD, 2));
@@ -1364,7 +1376,7 @@ class DomainRenewFlowTest extends ResourceFlowTestCase<DomainRenewFlow, Domain> 
 
     setEppInput(
         "domain_renew_allocationtoken.xml",
-        ImmutableMap.of("DOMAIN", "example.tld", "YEARS", "2", "TOKEN", "__REMOVEDOMAIN__"));
+        ImmutableMap.of("DOMAIN", "example.tld", "YEARS", "2", "TOKEN", "__REMOVE_BULK_PRICING__"));
 
     dryRunFlowAssertResponse(
         loadFile(

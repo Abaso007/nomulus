@@ -1,5 +1,5 @@
 # This is the default configuration file for Nomulus. Do not make changes to it
-# unless you are writing new features that requires you to. To customize an
+# unless you are writing new features that require you to. To customize an
 # individual deployment or environment, create a nomulus-config.yaml file in the
 # WEB-INF/ directory overriding only the values you wish to change. You may need
 # to override some of these values to configure and enable some services used in
@@ -20,8 +20,12 @@ gcpProject:
   # URLs of the services for the project.
   defaultServiceUrl: https://default.example.com
   backendServiceUrl: https://backend.example.com
+  bsaServiceUrl: https://bsa.example.com
   toolsServiceUrl: https://tools.example.com
   pubapiServiceUrl: https://pubapi.example.com
+
+  # The base domain name of the registry service. Services are reachable at [service].baseDomain.
+  baseDomain: registry.test
 
 gSuite:
   # Publicly accessible domain name of the running G Suite instance.
@@ -45,6 +49,11 @@ gSuite:
   # given "ADMIN" role on the registrar console.
   supportGroupEmailAddress: support@example.com
 
+  # Group containing the emails of console users. This group should be granted
+  # roles/iap.httpsResourceAccessor out-of-band. If this field is empty, each
+  # console user will be granted to the role individually when they are created.
+  consoleUserGroupEmailAddress:
+
 registryPolicy:
   # Repository identifier (ROID) suffix for contacts and hosts.
   contactAndHostRoidSuffix: ROID
@@ -66,7 +75,7 @@ registryPolicy:
 
   # Custom logic class for handling DNS query count reporting for ICANN.
   # See reporting/icann/DnsCountQueryCoordinator.java
-  dnsCountQueryCoordinatorClass: google.registry.reporting.icann.BasicDnsCountQueryCoordinator
+  dnsCountQueryCoordinatorClass: google.registry.reporting.icann.DummyDnsCountQueryCoordinator
 
   # Length of time after which contact transfers automatically conclude.
   contactAutomaticTransferDays: 5
@@ -128,6 +137,12 @@ registryPolicy:
     unlawful behavior. We reserve the right to restrict or deny your access to
     the WHOIS database, and may modify these terms at any time.
 
+  # BSA blocked domain name template.
+  domainBlockedByBsaTemplate: |
+    Domain Name: %s
+    >>> This name is not available for registration.
+    >>> This name has been blocked by a GlobalBlock service.
+
   # RDAP Terms of Service text displayed at the /rdap/help/tos endpoint.
   rdapTos: >
     By querying our Domain Database as part of the RDAP pilot program (RDAP
@@ -188,12 +203,26 @@ registryPolicy:
   # will be free.
   sunriseDomainCreateDiscount: 0.15
 
+  # List of registrars participating in tiered pricing promotions that require
+  # non-standard responses to EPP domain:check and domain:create commands.
+  # When a promotion is active, we will set an additional STANDARD PROMOTION
+  # fee check response on any domain checks that corresponds to the actual
+  # promotional price (the regular response will be the non-promotional price).
+  # In addition, we will return the non-promotional (i.e. incorrect) price on
+  # domain create requests.
+  tieredPricingPromotionRegistrarIds: []
+  # List of registrars for which we won't send poll message on standard domain
+  # deletions.
+  noPollMessageOnDeletionRegistrarIds: []
+
 hibernate:
-  # Make it possible to specify the isolation level for each transaction. If set
-  # to true, nested transactions will throw an exception. If set to false, a
-  # transaction with the isolation override specified will still execute at the
-  # default level (specified below).
-  perTransactionIsolation: false
+  # If set to false, calls to tm().transact() cannot be nested. If set to true,
+  # nested calls to tm().transact() are allowed, as long as they do not specify
+  # a transaction isolation level override. These nested transactions should
+  # either be refactored to non-nested transactions, or changed to
+  # tm().reTransact(), which explicitly allows nested transactions, but does not
+  # allow setting an isolation level override.
+  allowNestedTransactions: true
 
   # Make 'SERIALIZABLE' the default isolation level to ensure correctness.
   #
@@ -304,34 +333,16 @@ caching:
 # Note: Only allowedServiceAccountEmails and oauthClientId should be configured.
 # Other fields are related to OAuth-based authentication and will be removed.
 auth:
-  # Deprecated: Use OIDC-based auth instead. This field is for OAuth-based auth.
-  # OAuth scopes to detect on access tokens. Superset of requiredOauthScopes.
-  availableOauthScopes:
-  - https://www.googleapis.com/auth/userinfo.email
-
-  # Deprecated: Use OIDC-based auth instead. This field is for OAuth-based auth.
-  # OAuth scopes required for authenticating. Subset of availableOauthScopes.
-  requiredOauthScopes:
-  - https://www.googleapis.com/auth/userinfo.email
-
-  # Deprecated: Use OIDC-based auth instead. This field is for OAuth-based auth.
-  # OAuth client IDs that are allowed to authenticate and communicate with
-  # backend services, e.g. nomulus tool, EPP proxy, etc. The value in
-  # registryTool.clientId field should be included in this list. Client IDs are
-  # typically of the format
-  # numbers-alphanumerics.apps.googleusercontent.com
-  allowedOauthClientIds: []
-
-  # Service accounts (e.g. default service account, account used by Cloud
+  # Service accounts (e.g., default service account, account used by Cloud
   # Scheduler) allowed to send authenticated requests.
   allowedServiceAccountEmails:
   - default-service-account-email@email.com
   - cloud-scheduler-email@email.com
 
   # OAuth 2.0 client ID that will be used as the audience in OIDC ID tokens sent
-  # from clients (e.g. proxy, nomulus tool, cloud tasks) for authentication. The
+  # from clients (e.g., proxy, nomulus tool, cloud tasks) for authentication. The
   # same ID is the only one accepted by the regular OIDC or IAP authentication
-  # mechanisms. In most cases we should use the client ID created for IAP here,
+  # mechanisms. In most cases, we should use the client ID created for IAP here,
   # as it allows requests bearing a token with this audience to be accepted by
   # both IAP or regular OIDC. The clientId value in proxy config file should be
   # the same as this one.
@@ -355,6 +366,11 @@ credentialOAuth:
   delegatedCredentialOauthScopes:
   # View and manage groups on your domain in Directory API.
   - https://www.googleapis.com/auth/admin.directory.group
+  # View and manage users in Google Workspace
+  - https://www.googleapis.com/auth/admin.directory.user
+  # Security scope which seems to be required to create users via API,
+  # based on https://github.com/googleapis/google-api-nodejs-client/issues/1884
+  - https://www.googleapis.com/auth/admin.directory.user.security
   # View and manage group settings in Group Settings API.
   - https://www.googleapis.com/auth/apps.groups.settings
   # Send email through Gmail.
@@ -385,6 +401,7 @@ billing:
   # Optional return address that overrides the default.
   invoiceReplyToEmailAddress: null
   invoiceFilePrefix: REG-INV
+  billingInvoiceOriginUrl: https://billing-origin-url/
 
 rde:
   # URL prefix of ICANN's server to upload RDE reports to. Nomulus adds /TLD/ID
@@ -399,9 +416,8 @@ rde:
   sshIdentityEmailAddress: rde@example.com
 
 registrarConsole:
-  # Filename of the logo to use in the header of the console. This filename is
-  # relative to ui/assets/images/
-  logoFilename: logo.png
+  # DUM download file name, excluding the extension
+  dumFileName: dum_file_name
 
   # Contact phone number for support with the registry.
   supportPhoneNumber: +1 (888) 555 0123
@@ -409,19 +425,8 @@ registrarConsole:
   # Contact email address for support with the registry.
   supportEmailAddress: support@example.com
 
-  # From: email address used to send announcements from the registry.
-  announcementsEmailAddress: announcements@example.com
-
-  # Contact email address for questions about integrating with the registry.
-  integrationEmailAddress: integration@example.com
-
   # URL linking to directory of technical support docs on the registry.
   technicalDocsUrl: http://example.com/your_support_docs/
-
-  # Configuration for all analytics services installed in the web console
-  analyticsConfig:
-    # Google Analytics account where data on console use is sent, optional
-    googleAnalyticsId: null
 
 monitoring:
   # Max queries per second for the Google Cloud Monitoring V3 (aka Stackdriver)
@@ -442,6 +447,9 @@ misc:
 
   # Whether emails may be sent. For Prod and Sandbox this should be true.
   isEmailSendingEnabled: false
+
+  # Delay between bulk messages to avoid triggering Gmail fraud checks
+  emailThrottleSeconds: 30
 
   # Address we send alert summary emails to.
   alertRecipientEmailAddress: email@example.com
@@ -479,11 +487,6 @@ beam:
   # not in use.
   initialWorkerCount: 24
   stagingBucketUrl: gcs-bucket-with-staged-templates
-
-keyring:
-  # The name of the active keyring, either "Dummy" or "CSM". The latter stands
-  # for Cloud SecretManager.
-  activeKeyring: Dummy
 
 # Configuration options relevant to the "nomulus" registry tool.
 registryTool:
@@ -613,3 +616,48 @@ bulkPricingPackageMonitoring:
     Registrar: %3$s
     Active Domain Limit: %4$s
     Current Active Domains: %5$s
+
+# Configurations for integration with Brand Safety Alliance (BSA) API
+bsa:
+  # Algorithm for calculating block list checksums
+  bsaChecksumAlgorithm: SHA-256
+  # The time allotted to every BSA cron job.
+  bsaLockLeaseExpiryMinutes: 30
+  # Desired time between successive downloads.
+  bsaDownloadIntervalMinutes: 30
+  # Max time period during which downloads can be skipped because checksums have
+  # not changed from the previous one.
+  bsaMaxNopIntervalHours: 24
+  # A very lax upper bound of the lag between a domain-creating transaction's
+  # recorded and actual commit time. In Nomulus, a domain's creation time is the
+  # start time of the transaction, while the domain is only visible after the
+  # transaction commits. Let `l` represents this lag, then at any point of time
+  # `t`, a query of domains by creation time is only guaranteed to find those
+  # created before `t - l`. Please See `BsaRefreshAction` for use case.
+  #
+  # The value below is decided by finding the longest domain-creation EPP
+  # request over the past 3 months (60 seconds, which is much longer than the
+  # transaction time), and add to it the maximum allowed replication lag (30
+  # seconds).
+  domainCreateTxnCommitTimeLagSeconds: 90
+  # Number of entities (labels and unblockable domains) to process in a single
+  # DB transaction.
+  bsaTxnBatchSize: 1000
+  # Used by `BsaValidateAction`: ignore inconsistencies caused by recent events
+  # in the past. This is roughly equal to two `BsaRefreshAction` runs.
+  bsaValidationMaxStalenessSeconds: 3600
+
+  # Http endpoint for acquiring Auth tokens.
+  authUrl: "https://"
+  # Auth token expiry.
+  authTokenExpirySeconds: 1800
+  # Http endpoints for downloading data
+  dataUrls:
+    "BLOCK": "https://"
+    "BLOCK_PLUS": "https://"
+  # Http endpoint for reporting order processing status
+  orderStatusUrl: "https://"
+  # Http endpoint for reporting changes in the set of unblockable domains.
+  unblockableDomainsUrl: "https://"
+  # API endpoint for uploading the list of unavailable domain names.
+  uploadUnavailableDomainsUrl: "https://"

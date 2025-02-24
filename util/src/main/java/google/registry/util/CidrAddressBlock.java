@@ -292,18 +292,17 @@ public class CidrAddressBlock implements Iterable<InetAddress>, Serializable {
   }
 
   /**
-   * @return the standard {@code String} representation of the IP portion
-   * of this CIDR block (a.b.c.d, or a:b:c::d)
+   * Returns the standard {@code String} representation of the IP portion of this CIDR block
+   * (a.b.c.d, or a:b:c::d)
    *
-   * <p>NOTE: This is not reliable for comparison operations. It is
-   * more reliable to normalize strings into {@link InetAddress}s and
-   * then compare.
+   * <p>NOTE: This is not reliable for comparison operations. It is more reliable to normalize
+   * strings into {@link InetAddress}s and then compare.
    *
    * <p>Consider:
+   *
    * <ul>
-   * <li>{@code "10.11.12.0"} is equivalent to {@code "10.11.12.000"}
-   * <li>{@code "2001:db8::"} is equivalent to
-   *     {@code "2001:0DB8:0000:0000:0000:0000:0000:0000"}
+   *   <li>{@code "10.11.12.0"} is equivalent to {@code "10.11.12.000"}
+   *   <li>{@code "2001:db8::"} is equivalent to {@code "2001:0DB8:0000:0000:0000:0000:0000:0000"}
    * </ul>
    */
   public String getIp() {
@@ -442,7 +441,7 @@ public class CidrAddressBlock implements Iterable<InetAddress>, Serializable {
 
   @Override
   public Iterator<InetAddress> iterator() {
-    return new AbstractSequentialIterator<InetAddress>(ip) {
+    return new AbstractSequentialIterator<>(ip) {
       @Override
       protected InetAddress computeNext(InetAddress previous) {
         if (InetAddresses.isMaximum(previous)) {
@@ -464,11 +463,10 @@ public class CidrAddressBlock implements Iterable<InetAddress>, Serializable {
 
   @Override
   public boolean equals(@Nullable Object o) {
-    if (!(o instanceof CidrAddressBlock)) {
+    if (!(o instanceof CidrAddressBlock cidr)) {
       return false;
     }
 
-    CidrAddressBlock cidr = (CidrAddressBlock) o;
     return ip.equals(cidr.ip) && (netmask == cidr.netmask);
   }
 

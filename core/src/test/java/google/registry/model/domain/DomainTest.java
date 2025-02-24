@@ -17,7 +17,6 @@ package google.registry.model.domain;
 import static com.google.common.collect.ImmutableSet.toImmutableSet;
 import static com.google.common.collect.Iterables.getOnlyElement;
 import static com.google.common.truth.Truth.assertThat;
-import static com.google.common.truth.Truth8.assertThat;
 import static google.registry.model.EppResourceUtils.loadByForeignKey;
 import static google.registry.model.billing.BillingBase.RenewalPriceBehavior.SPECIFIED;
 import static google.registry.model.domain.token.AllocationToken.TokenType.BULK_PRICING;
@@ -186,7 +185,7 @@ public class DomainTest {
                             StatusValue.SERVER_UPDATE_PROHIBITED,
                             StatusValue.SERVER_RENEW_PROHIBITED,
                             StatusValue.SERVER_HOLD))
-                    .setRegistrant(contact1Key)
+                    .setRegistrant(Optional.of(contact1Key))
                     .setNameservers(ImmutableSet.of(hostKey))
                     .setSubordinateHosts(ImmutableSet.of("ns1.example.com"))
                     .setPersistedCurrentSponsorRegistrarId("NewRegistrar")
@@ -241,6 +240,16 @@ public class DomainTest {
     // original domain object).
     assertThat(loadByForeignKey(Domain.class, domain.getForeignKey(), fakeClock.nowUtc()))
         .hasValue(domain);
+  }
+
+  @Test
+  void testRegistrantNotRequired() {
+    persistResource(domain.asBuilder().setRegistrant(Optional.empty()).build());
+    assertThat(
+            loadByForeignKey(Domain.class, domain.getForeignKey(), fakeClock.nowUtc())
+                .get()
+                .getRegistrant())
+        .isEmpty();
   }
 
   @Test
@@ -833,7 +842,9 @@ public class DomainTest {
             new AllocationToken.Builder()
                 .setToken("abc123")
                 .setTokenType(BULK_PRICING)
+                .setDiscountFraction(1.0)
                 .setRenewalPriceBehavior(SPECIFIED)
+                .setRenewalPrice(Money.of(USD, 0))
                 .setAllowedEppActions(ImmutableSet.of(CommandName.CREATE))
                 .setAllowedRegistrarIds(ImmutableSet.of("TheRegistrar"))
                 .build());
@@ -895,7 +906,9 @@ public class DomainTest {
             new AllocationToken.Builder()
                 .setToken("abc123")
                 .setTokenType(BULK_PRICING)
+                .setDiscountFraction(1.0)
                 .setRenewalPriceBehavior(SPECIFIED)
+                .setRenewalPrice(Money.of(USD, 0))
                 .setAllowedEppActions(ImmutableSet.of(CommandName.CREATE))
                 .setAllowedRegistrarIds(ImmutableSet.of("TheRegistrar"))
                 .build());
@@ -1013,17 +1026,17 @@ public class DomainTest {
             DesignatedContact.create(Type.BILLING, contact3Key),
             DesignatedContact.create(Type.TECH, contact4Key)),
         true);
-    assertThat(domain.getRegistrant()).isEqualTo(contact1Key);
-    assertThat(domain.getAdminContact()).isEqualTo(contact2Key);
-    assertThat(domain.getBillingContact()).isEqualTo(contact3Key);
-    assertThat(domain.getTechContact()).isEqualTo(contact4Key);
+    assertThat(domain.getRegistrant()).hasValue(contact1Key);
+    assertThat(domain.getAdminContact()).hasValue(contact2Key);
+    assertThat(domain.getBillingContact()).hasValue(contact3Key);
+    assertThat(domain.getTechContact()).hasValue(contact4Key);
 
     // Make sure everything gets nulled out.
     domain.setContactFields(ImmutableSet.of(), true);
-    assertThat(domain.getRegistrant()).isNull();
-    assertThat(domain.getAdminContact()).isNull();
-    assertThat(domain.getBillingContact()).isNull();
-    assertThat(domain.getTechContact()).isNull();
+    assertThat(domain.getRegistrant()).isEmpty();
+    assertThat(domain.getAdminContact()).isEmpty();
+    assertThat(domain.getBillingContact()).isEmpty();
+    assertThat(domain.getTechContact()).isEmpty();
 
     // Make sure that changes don't affect the registrant unless requested.
     domain.setContactFields(
@@ -1033,16 +1046,16 @@ public class DomainTest {
             DesignatedContact.create(Type.BILLING, contact3Key),
             DesignatedContact.create(Type.TECH, contact4Key)),
         false);
-    assertThat(domain.getRegistrant()).isNull();
-    assertThat(domain.getAdminContact()).isEqualTo(contact2Key);
-    assertThat(domain.getBillingContact()).isEqualTo(contact3Key);
-    assertThat(domain.getTechContact()).isEqualTo(contact4Key);
-    domain = domain.asBuilder().setRegistrant(contact1Key).build();
+    assertThat(domain.getRegistrant()).isEmpty();
+    assertThat(domain.getAdminContact()).hasValue(contact2Key);
+    assertThat(domain.getBillingContact()).hasValue(contact3Key);
+    assertThat(domain.getTechContact()).hasValue(contact4Key);
+    domain = domain.asBuilder().setRegistrant(Optional.of(contact1Key)).build();
     domain.setContactFields(ImmutableSet.of(), false);
-    assertThat(domain.getRegistrant()).isEqualTo(contact1Key);
-    assertThat(domain.getAdminContact()).isNull();
-    assertThat(domain.getBillingContact()).isNull();
-    assertThat(domain.getTechContact()).isNull();
+    assertThat(domain.getRegistrant()).hasValue(contact1Key);
+    assertThat(domain.getAdminContact()).isEmpty();
+    assertThat(domain.getBillingContact()).isEmpty();
+    assertThat(domain.getTechContact()).isEmpty();
   }
 
   @Test
@@ -1065,7 +1078,9 @@ public class DomainTest {
         new AllocationToken.Builder()
             .setToken("abc123")
             .setTokenType(BULK_PRICING)
+            .setDiscountFraction(1.0)
             .setRenewalPriceBehavior(SPECIFIED)
+            .setRenewalPrice(Money.of(USD, 0))
             .setAllowedEppActions(ImmutableSet.of(CommandName.CREATE))
             .setAllowedRegistrarIds(ImmutableSet.of("TheRegistrar"))
             .build();
@@ -1083,7 +1098,9 @@ public class DomainTest {
             new AllocationToken.Builder()
                 .setToken("abc123")
                 .setTokenType(BULK_PRICING)
+                .setDiscountFraction(1.0)
                 .setRenewalPriceBehavior(SPECIFIED)
+                .setRenewalPrice(Money.of(USD, 0))
                 .setAllowedEppActions(ImmutableSet.of(CommandName.CREATE))
                 .setAllowedRegistrarIds(ImmutableSet.of("TheRegistrar"))
                 .build());

@@ -15,11 +15,12 @@
 package google.registry.persistence.transaction;
 
 import static com.google.common.base.Preconditions.checkArgument;
+import static com.google.common.base.Throwables.throwIfUnchecked;
 import static com.google.common.collect.ImmutableList.toImmutableList;
 import static com.google.common.collect.ImmutableMap.toImmutableMap;
 import static com.google.common.collect.ImmutableSet.toImmutableSet;
-import static google.registry.config.RegistryConfig.getHibernatePerTransactionIsolationEnabled;
-import static google.registry.persistence.transaction.DatabaseException.tryWrapAndThrow;
+import static google.registry.config.RegistryConfig.getHibernateAllowNestedTransactions;
+import static google.registry.persistence.transaction.DatabaseException.throwIfSqlException;
 import static google.registry.util.PreconditionsUtils.checkArgumentNotNull;
 import static java.util.AbstractMap.SimpleEntry;
 import static java.util.stream.Collectors.joining;
@@ -31,13 +32,30 @@ import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Streams;
 import com.google.common.flogger.FluentLogger;
+import com.google.common.flogger.StackSize;
 import google.registry.model.ImmutableObject;
 import google.registry.persistence.JpaRetries;
 import google.registry.persistence.PersistenceModule.TransactionIsolationLevel;
 import google.registry.persistence.VKey;
 import google.registry.util.Clock;
+import google.registry.util.RegistryEnvironment;
 import google.registry.util.Retrier;
 import google.registry.util.SystemSleeper;
+import jakarta.persistence.CacheRetrieveMode;
+import jakarta.persistence.CacheStoreMode;
+import jakarta.persistence.EntityManager;
+import jakarta.persistence.EntityManagerFactory;
+import jakarta.persistence.EntityTransaction;
+import jakarta.persistence.FlushModeType;
+import jakarta.persistence.LockModeType;
+import jakarta.persistence.Parameter;
+import jakarta.persistence.PersistenceException;
+import jakarta.persistence.Query;
+import jakarta.persistence.TemporalType;
+import jakarta.persistence.TypedQuery;
+import jakarta.persistence.criteria.CriteriaQuery;
+import jakarta.persistence.metamodel.EntityType;
+import jakarta.persistence.metamodel.Metamodel;
 import java.io.Serializable;
 import java.lang.reflect.Array;
 import java.lang.reflect.Field;
@@ -52,22 +70,15 @@ import java.util.Map;
 import java.util.NoSuchElementException;
 import java.util.Optional;
 import java.util.Set;
+import java.util.concurrent.Callable;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Supplier;
 import java.util.stream.Stream;
 import java.util.stream.StreamSupport;
 import javax.annotation.Nullable;
-import javax.persistence.EntityManager;
-import javax.persistence.EntityManagerFactory;
-import javax.persistence.EntityTransaction;
-import javax.persistence.FlushModeType;
-import javax.persistence.LockModeType;
-import javax.persistence.Parameter;
-import javax.persistence.PersistenceException;
-import javax.persistence.Query;
-import javax.persistence.TemporalType;
-import javax.persistence.TypedQuery;
-import javax.persistence.criteria.CriteriaQuery;
-import javax.persistence.metamodel.EntityType;
+import org.hibernate.Session;
+import org.hibernate.SessionFactory;
 import org.hibernate.cfg.Environment;
 import org.joda.time.DateTime;
 
@@ -76,17 +87,27 @@ public class JpaTransactionManagerImpl implements JpaTransactionManager {
 
   private static final FluentLogger logger = FluentLogger.forEnclosingClass();
   private static final Retrier retrier = new Retrier(new SystemSleeper(), 3);
+  private static final String NESTED_TRANSACTION_MESSAGE =
+      "Nested transaction detected. Try refactoring to avoid nested transactions. If unachievable,"
+          + " use reTransact() in nested transactions";
+  private static final String SQL_STATEMENT_LOG_SENTINEL_FORMAT = "SQL_STATEMENT_LOG: %s";
 
   // EntityManagerFactory is thread safe.
   private final EntityManagerFactory emf;
   private final Clock clock;
+  private final boolean readOnly;
 
   private static final ThreadLocal<TransactionInfo> transactionInfo =
       ThreadLocal.withInitial(TransactionInfo::new);
 
-  public JpaTransactionManagerImpl(EntityManagerFactory emf, Clock clock) {
+  public JpaTransactionManagerImpl(EntityManagerFactory emf, Clock clock, boolean readOnly) {
     this.emf = emf;
     this.clock = clock;
+    this.readOnly = readOnly;
+  }
+
+  public JpaTransactionManagerImpl(EntityManagerFactory emf, Clock clock) {
+    this(emf, clock, false);
   }
 
   @Override
@@ -100,14 +121,14 @@ public class JpaTransactionManagerImpl implements JpaTransactionManager {
   }
 
   @Override
+  public Metamodel getMetaModel() {
+    return this.emf.getMetamodel();
+  }
+
+  @Override
   public EntityManager getEntityManager() {
-    EntityManager entityManager = transactionInfo.get().entityManager;
-    if (entityManager == null) {
-      throw new PersistenceException(
-          "No EntityManager has been initialized. getEntityManager() must be invoked in the scope"
-              + " of a transaction");
-    }
-    return entityManager;
+    assertInTransaction();
+    return transactionInfo.get().entityManager;
   }
 
   @Override
@@ -131,6 +152,12 @@ public class JpaTransactionManagerImpl implements JpaTransactionManager {
   }
 
   @Override
+  public long allocateId() {
+    assertInTransaction();
+    return transactionInfo.get().idProvider.get();
+  }
+
+  @Override
   public void assertInTransaction() {
     if (!inTransaction()) {
       throw new IllegalStateException("Not in a transaction");
@@ -138,127 +165,156 @@ public class JpaTransactionManagerImpl implements JpaTransactionManager {
   }
 
   @Override
-  public void assertTransactionIsolationLevel(TransactionIsolationLevel expectedLevel) {
-    assertInTransaction();
-    TransactionIsolationLevel currentLevel = getCurrentTransactionIsolationLevel();
-    if (currentLevel != expectedLevel) {
-      throw new IllegalStateException(
-          String.format(
-              "Current transaction isolation level (%s) is not as expected (%s)",
-              currentLevel, expectedLevel));
-    }
-  }
-
-  @Override
-  public <T> T transact(Supplier<T> work, TransactionIsolationLevel isolationLevel) {
+  public <T> T reTransact(Callable<T> work) {
     // This prevents inner transaction from retrying, thus avoiding a cascade retry effect.
     if (inTransaction()) {
-      return transactNoRetry(work, isolationLevel);
+      return transactNoRetry(null, work);
     }
     return retrier.callWithRetry(
-        () -> transactNoRetry(work, isolationLevel), JpaRetries::isFailedTxnRetriable);
+        () -> transactNoRetry(null, work), JpaRetries::isFailedTxnRetriable);
   }
 
   @Override
-  public <T> T reTransact(Supplier<T> work) {
-    return transact(work);
+  public <T> T transact(TransactionIsolationLevel isolationLevel, Callable<T> work) {
+    return transact(isolationLevel, work, false);
   }
 
   @Override
-  public <T> T transact(Supplier<T> work) {
-    return transact(work, null);
+  public <T> T transact(
+      TransactionIsolationLevel isolationLevel, Callable<T> work, boolean logSqlStatements) {
+    if (inTransaction()) {
+      if (!getHibernateAllowNestedTransactions()) {
+        throw new IllegalStateException(NESTED_TRANSACTION_MESSAGE);
+      }
+      if (RegistryEnvironment.get() != RegistryEnvironment.UNITTEST) {
+        logger.atWarning().withStackTrace(StackSize.MEDIUM).atMostEvery(1, TimeUnit.MINUTES).log(
+            NESTED_TRANSACTION_MESSAGE);
+      }
+      // This prevents inner transaction from retrying, thus avoiding a cascade retry effect.
+      return transactNoRetry(isolationLevel, work);
+    }
+    return retrier.callWithRetry(
+        () -> transactNoRetry(isolationLevel, work, logSqlStatements),
+        JpaRetries::isFailedTxnRetriable);
+  }
+
+  @Override
+  public <T> T transact(Callable<T> work) {
+    return transact(null, work);
+  }
+
+  @Override
+  public <T> T transactNoRetry(Callable<T> work) {
+    return transactNoRetry(null, work);
   }
 
   @Override
   public <T> T transactNoRetry(
-      Supplier<T> work, @Nullable TransactionIsolationLevel isolationLevel) {
+      @Nullable TransactionIsolationLevel isolationLevel, Callable<T> work) {
+    return transactNoRetry(isolationLevel, work, false);
+  }
+
+  @Override
+  public <T> T transactNoRetry(
+      @Nullable TransactionIsolationLevel isolationLevel,
+      Callable<T> work,
+      boolean logSqlStatements) {
     if (inTransaction()) {
-      if (isolationLevel != null && getHibernatePerTransactionIsolationEnabled()) {
-        TransactionIsolationLevel enclosingLevel = getCurrentTransactionIsolationLevel();
-        if (isolationLevel != enclosingLevel) {
-          throw new IllegalStateException(
-              String.format(
-                  "Isolation level conflict detected in nested transactions.\n"
-                      + "Enclosing transaction: %s\nCurrent transaction: %s",
-                  enclosingLevel, isolationLevel));
-        }
+      // This check will no longer be necessary when the transact() method always throws
+      // inside a nested transaction, as the only way to pass a non-null isolation level
+      // is by calling the transact() method (and its variants), which would have already
+      // thrown before calling transactNoRetry() when inside a nested transaction.
+      //
+      // For now, we still need it, so we don't accidentally call a nested transact() with an
+      // isolation level override. This buys us time to detect nested transact() calls and either
+      // remove them or change the call site to reTransact().
+      if (isolationLevel != null) {
+        throw new IllegalStateException(
+            "Transaction isolation level cannot be specified for nested transactions");
       }
-      return work.get();
+      try {
+        return work.call();
+      } catch (Exception e) {
+        throwIfSqlException(e);
+        throwIfUnchecked(e);
+        throw new RuntimeException(e);
+      }
     }
     TransactionInfo txnInfo = transactionInfo.get();
-    txnInfo.entityManager = emf.createEntityManager();
+
+    txnInfo.entityManager =
+        logSqlStatements
+            ? emf.unwrap(SessionFactory.class)
+                .withOptions()
+                .statementInspector(
+                    s -> {
+                      logger.atInfo().log(SQL_STATEMENT_LOG_SENTINEL_FORMAT, s);
+                      return s;
+                    })
+                .openSession()
+            : emf.createEntityManager();
+    if (readOnly) {
+      // Disable Hibernate's dirty object check on flushing, it has become more aggressive in v6.
+      txnInfo.entityManager.unwrap(Session.class).setDefaultReadOnly(true);
+    }
     EntityTransaction txn = txnInfo.entityManager.getTransaction();
     try {
       txn.begin();
-      txnInfo.start(clock);
-      if (isolationLevel != null) {
-        if (getHibernatePerTransactionIsolationEnabled()) {
-          getEntityManager()
-              .createNativeQuery(
-                  String.format("SET TRANSACTION ISOLATION LEVEL %s", isolationLevel.getMode()))
-              .executeUpdate();
-          logger.atInfo().log("Running transaction at %s", isolationLevel);
-        } else {
-          logger.atWarning().log(
-              "Per-transaction isolation level disabled, but %s was requested", isolationLevel);
-        }
+      txnInfo.start(clock, readOnly ? ReplicaDbIdService::allocateId : this::fetchIdFromSequence);
+      if (readOnly) {
+        getEntityManager().createNativeQuery("SET TRANSACTION READ ONLY").executeUpdate();
+        logger.atInfo().log("Using read-only SQL replica");
       }
-      T result = work.get();
+      if (isolationLevel != null && isolationLevel != getDefaultTransactionIsolationLevel()) {
+        getEntityManager()
+            .createNativeQuery(
+                String.format("SET TRANSACTION ISOLATION LEVEL %s", isolationLevel.getMode()))
+            .executeUpdate();
+        logger.atInfo().log(
+            "Overriding transaction isolation level from %s to %s",
+            getDefaultTransactionIsolationLevel(), isolationLevel);
+      }
+      T result = work.call();
       txn.commit();
       return result;
-    } catch (RuntimeException | Error e) {
-      // Error is unchecked!
+    } catch (Throwable e) {
+      // Catch a Throwable here so even Errors would lead to a rollback.
       try {
         txn.rollback();
         logger.atWarning().log("Error during transaction; transaction rolled back.");
-      } catch (Throwable rollbackException) {
+      } catch (Exception rollbackException) {
         logger.atSevere().withCause(rollbackException).log("Rollback failed; suppressing error.");
       }
-      tryWrapAndThrow(e);
-      throw e;
+      throwIfSqlException(e);
+      throwIfUnchecked(e);
+      throw new RuntimeException(e);
     } finally {
       txnInfo.clear();
     }
   }
 
   @Override
-  public <T> T transactNoRetry(Supplier<T> work) {
-    return transactNoRetry(work, null);
-  }
-
-  @Override
-  public void transact(Runnable work, TransactionIsolationLevel isolationLevel) {
+  public void transact(TransactionIsolationLevel isolationLevel, ThrowingRunnable work) {
     transact(
+        isolationLevel,
         () -> {
           work.run();
           return null;
-        },
-        isolationLevel);
+        });
   }
 
   @Override
-  public void reTransact(Runnable work) {
-    transact(work);
+  public void transact(ThrowingRunnable work) {
+    transact(null, work);
   }
 
   @Override
-  public void transact(Runnable work) {
-    transact(work, null);
-  }
-
-  @Override
-  public void transactNoRetry(Runnable work, TransactionIsolationLevel isolationLevel) {
-    transactNoRetry(
+  public void reTransact(ThrowingRunnable work) {
+    reTransact(
         () -> {
           work.run();
           return null;
-        },
-        isolationLevel);
-  }
-
-  @Override
-  public void transactNoRetry(Runnable work) {
-    transactNoRetry(work, null);
+        });
   }
 
   @Override
@@ -538,15 +594,20 @@ public class JpaTransactionManagerImpl implements JpaTransactionManager {
     return emf.getMetamodel().entity(clazz);
   }
 
-  private static class EntityId {
-    private final String name;
-    private final Object value;
-
-    private EntityId(String name, Object value) {
-      this.name = name;
-      this.value = value;
-    }
+  /**
+   * A SQL Sequence based ID allocator that generates an ID from a monotonically increasing {@link
+   * AtomicLong}
+   *
+   * <p>The generated IDs are project-wide unique.
+   */
+  private long fetchIdFromSequence() {
+    return (Long)
+        getEntityManager()
+            .createNativeQuery("SELECT nextval('project_wide_unique_id_seq')")
+            .getSingleResult();
   }
+
+  private record EntityId(String name, Object value) {}
 
   private static ImmutableSet<EntityId> getEntityIdsFromEntity(
       EntityType<?> entityType, Object entity) {
@@ -670,6 +731,7 @@ public class JpaTransactionManagerImpl implements JpaTransactionManager {
     EntityManager entityManager;
     boolean inTransaction = false;
     DateTime transactionTime;
+    Supplier<Long> idProvider;
 
     // The set of entity objects that have been either persisted (via insert()) or merged (via
     // put()/update()). If the entity manager returns these as a result of a find() or query
@@ -678,13 +740,15 @@ public class JpaTransactionManagerImpl implements JpaTransactionManager {
     Set<Object> objectsToSave = Collections.newSetFromMap(new IdentityHashMap<>());
 
     /** Start a new transaction. */
-    private void start(Clock clock) {
+    private void start(Clock clock, Supplier<Long> idProvider) {
       checkArgumentNotNull(clock);
       inTransaction = true;
       transactionTime = clock.nowUtc();
+      this.idProvider = idProvider;
     }
 
     private void clear() {
+      idProvider = null;
       inTransaction = false;
       transactionTime = null;
       objectsToSave = Collections.newSetFromMap(new IdentityHashMap<>());
@@ -726,6 +790,44 @@ public class JpaTransactionManagerImpl implements JpaTransactionManager {
 
     DetachingTypedQuery(TypedQuery<T> delegate) {
       this.delegate = delegate;
+    }
+
+    @Override
+    public Integer getTimeout() {
+      return delegate.getTimeout();
+    }
+
+    @Override
+    public CacheRetrieveMode getCacheRetrieveMode() {
+      return delegate.getCacheRetrieveMode();
+    }
+
+    @Override
+    public CacheStoreMode getCacheStoreMode() {
+      return delegate.getCacheStoreMode();
+    }
+
+    @Override
+    public TypedQuery<T> setTimeout(Integer timeout) {
+      delegate.setTimeout(timeout);
+      return this;
+    }
+
+    @Override
+    public TypedQuery<T> setCacheStoreMode(CacheStoreMode mode) {
+      delegate.setCacheStoreMode(mode);
+      return this;
+    }
+
+    @Override
+    public TypedQuery<T> setCacheRetrieveMode(CacheRetrieveMode mode) {
+      delegate.setCacheRetrieveMode(mode);
+      return this;
+    }
+
+    @Override
+    public T getSingleResultOrNull() {
+      return delegate.getSingleResultOrNull();
     }
 
     @Override
@@ -983,6 +1085,25 @@ public class JpaTransactionManagerImpl implements JpaTransactionManager {
       return buildQuery().getResultList().stream()
           .map(JpaTransactionManagerImpl.this::detach)
           .collect(toImmutableList());
+    }
+  }
+
+  /**
+   * Provides {@code long} values for use as {@code id} by JPA model entities in (read-only)
+   * transactions in the replica database. Each id is only unique in the JVM instance.
+   *
+   * <p>The {@link #fetchIdFromSequence database sequence-based id allocator} cannot be used with
+   * the replica because id generation is a write operation.
+   */
+  private static final class ReplicaDbIdService {
+
+    private static final AtomicLong nextId = new AtomicLong(1);
+
+    /**
+     * Returns the next long value from a {@link AtomicLong}. Each id is unique in the JVM instance.
+     */
+    static long allocateId() {
+      return nextId.getAndIncrement();
     }
   }
 }

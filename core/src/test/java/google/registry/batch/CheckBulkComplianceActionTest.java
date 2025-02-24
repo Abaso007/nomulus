@@ -20,6 +20,7 @@ import static google.registry.testing.DatabaseHelper.persistActiveContact;
 import static google.registry.testing.DatabaseHelper.persistEppResource;
 import static google.registry.testing.DatabaseHelper.persistResource;
 import static google.registry.testing.LogsSubject.assertAboutLogs;
+import static org.joda.money.CurrencyUnit.USD;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.times;
@@ -27,6 +28,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 
 import com.google.common.collect.ImmutableList;
+import com.google.common.collect.ImmutableSet;
 import com.google.common.testing.TestLogHandler;
 import google.registry.groups.GmailClient;
 import google.registry.model.billing.BillingBase.RenewalPriceBehavior;
@@ -43,7 +45,6 @@ import google.registry.ui.server.SendEmailUtils;
 import google.registry.util.EmailMessage;
 import java.util.logging.Level;
 import java.util.logging.Logger;
-import javax.mail.internet.InternetAddress;
 import org.joda.money.CurrencyUnit;
 import org.joda.money.Money;
 import org.joda.time.DateTime;
@@ -52,7 +53,6 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.RegisterExtension;
 import org.mockito.ArgumentCaptor;
-import org.testcontainers.shaded.com.google.common.collect.ImmutableSet;
 
 /** Unit tests for {@link CheckBulkComplianceAction}. */
 public class CheckBulkComplianceActionTest {
@@ -89,8 +89,6 @@ public class CheckBulkComplianceActionTest {
     loggerToIntercept.addHandler(logHandler);
     sendEmailUtils =
         new SendEmailUtils(
-            new InternetAddress("outgoing@registry.example"),
-            "UnitTest Registry",
             ImmutableList.of("notification@test.example", "notification2@test.example"),
             gmailClient);
     createTld("tld");
@@ -114,8 +112,9 @@ public class CheckBulkComplianceActionTest {
                 .setAllowedTlds(ImmutableSet.of("foo"))
                 .setAllowedRegistrarIds(ImmutableSet.of("TheRegistrar"))
                 .setRenewalPriceBehavior(RenewalPriceBehavior.SPECIFIED)
+                .setRenewalPrice(Money.of(CurrencyUnit.USD, 0))
                 .setAllowedEppActions(ImmutableSet.of(CommandName.CREATE))
-                .setDiscountFraction(1)
+                .setDiscountFraction(1.0)
                 .build());
     bulkPricingPackage =
         new BulkPricingPackage.Builder()
@@ -209,8 +208,9 @@ public class CheckBulkComplianceActionTest {
                 .setAllowedTlds(ImmutableSet.of("foo"))
                 .setAllowedRegistrarIds(ImmutableSet.of("TheRegistrar"))
                 .setRenewalPriceBehavior(RenewalPriceBehavior.SPECIFIED)
+                .setRenewalPrice(Money.of(USD, 0))
                 .setAllowedEppActions(ImmutableSet.of(CommandName.CREATE))
-                .setDiscountFraction(1)
+                .setDiscountFraction(1.0)
                 .build());
     BulkPricingPackage bulkPricingPackage2 =
         new BulkPricingPackage.Builder()
@@ -266,8 +266,9 @@ public class CheckBulkComplianceActionTest {
                 .setAllowedTlds(ImmutableSet.of("foo"))
                 .setAllowedRegistrarIds(ImmutableSet.of("TheRegistrar"))
                 .setRenewalPriceBehavior(RenewalPriceBehavior.SPECIFIED)
+                .setRenewalPrice(Money.of(USD, 0))
                 .setAllowedEppActions(ImmutableSet.of(CommandName.CREATE))
-                .setDiscountFraction(1)
+                .setDiscountFraction(1.0)
                 .build());
     BulkPricingPackage packagePromotion2 =
         new BulkPricingPackage.Builder()
@@ -341,8 +342,9 @@ public class CheckBulkComplianceActionTest {
                 .setAllowedTlds(ImmutableSet.of("foo"))
                 .setAllowedRegistrarIds(ImmutableSet.of("TheRegistrar"))
                 .setRenewalPriceBehavior(RenewalPriceBehavior.SPECIFIED)
+                .setRenewalPrice(Money.of(USD, 0))
                 .setAllowedEppActions(ImmutableSet.of(CommandName.CREATE))
-                .setDiscountFraction(1)
+                .setDiscountFraction(1.0)
                 .build());
     BulkPricingPackage bulkPricingPackage2 =
         new BulkPricingPackage.Builder()
@@ -407,8 +409,9 @@ public class CheckBulkComplianceActionTest {
                 .setAllowedTlds(ImmutableSet.of("foo"))
                 .setAllowedRegistrarIds(ImmutableSet.of("TheRegistrar"))
                 .setRenewalPriceBehavior(RenewalPriceBehavior.SPECIFIED)
+                .setRenewalPrice(Money.of(USD, 0))
                 .setAllowedEppActions(ImmutableSet.of(CommandName.CREATE))
-                .setDiscountFraction(1)
+                .setDiscountFraction(1.0)
                 .build());
     BulkPricingPackage bulkPricingPackage2 =
         new BulkPricingPackage.Builder()

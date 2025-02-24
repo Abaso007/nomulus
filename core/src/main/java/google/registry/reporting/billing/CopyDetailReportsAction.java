@@ -16,8 +16,8 @@ package google.registry.reporting.billing;
 
 import static com.google.common.base.Throwables.getRootCause;
 import static google.registry.request.Action.Method.POST;
-import static javax.servlet.http.HttpServletResponse.SC_INTERNAL_SERVER_ERROR;
-import static javax.servlet.http.HttpServletResponse.SC_OK;
+import static jakarta.servlet.http.HttpServletResponse.SC_INTERNAL_SERVER_ERROR;
+import static jakarta.servlet.http.HttpServletResponse.SC_OK;
 
 import com.google.cloud.storage.BlobId;
 import com.google.common.base.Splitter;
@@ -32,6 +32,7 @@ import google.registry.gcs.GcsUtils;
 import google.registry.model.registrar.Registrar;
 import google.registry.reporting.billing.BillingModule.InvoiceDirectoryPrefix;
 import google.registry.request.Action;
+import google.registry.request.Action.GaeService;
 import google.registry.request.Response;
 import google.registry.request.auth.Auth;
 import google.registry.storage.drive.DriveConnection;
@@ -44,10 +45,10 @@ import javax.inject.Inject;
 
 /** Copy all registrar detail reports in a given bucket's subdirectory from GCS to Drive. */
 @Action(
-    service = Action.Service.BACKEND,
+    service = GaeService.BACKEND,
     path = CopyDetailReportsAction.PATH,
     method = POST,
-    auth = Auth.AUTH_API_ADMIN)
+    auth = Auth.AUTH_ADMIN)
 public final class CopyDetailReportsAction implements Runnable {
 
   public static final String PATH = "/_dr/task/copyDetailReports";
@@ -97,14 +98,13 @@ public final class CopyDetailReportsAction implements Runnable {
       response.setPayload(String.format("Failure, encountered %s", e.getMessage()));
       return;
     }
-    ImmutableMap.Builder<String, Throwable> copyErrorsBuilder =
-        new ImmutableMap.Builder<String, Throwable>();
+    ImmutableMap.Builder<String, Throwable> copyErrorsBuilder = new ImmutableMap.Builder<>();
     for (String detailReportName : detailReportObjectNames) {
       // The standard report format is "invoice_details_yyyy-MM_registrarId_tld.csv
       // TODO(larryruili): Determine a safer way of enforcing this.
       String registrarId = Iterables.get(Splitter.on('_').split(detailReportName), 3);
       Optional<Registrar> registrar = Registrar.loadByRegistrarId(registrarId);
-      if (!registrar.isPresent()) {
+      if (registrar.isEmpty()) {
         logger.atWarning().log(
             "Registrar %s not found in database for file '%s'.", registrar, detailReportName);
         continue;

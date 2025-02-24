@@ -285,7 +285,7 @@ public class TestPipelineExtension extends Pipeline
     options.as(ApplicationNameOptions.class).setAppName(getAppName(context));
 
     // if the enforcement level has not been set by the user do auto-inference
-    if (!enforcement.isPresent()) {
+    if (enforcement.isEmpty()) {
       final boolean isCrashingRunner = CrashingRunner.class.isAssignableFrom(options.getRunner());
 
       checkState(
@@ -376,7 +376,7 @@ public class TestPipelineExtension extends Pipeline
     providerRuntimeValues.put(uuid, runtimeValue);
     return ValueProvider.NestedValueProvider.of(
         options.as(TestValueProviderOptions.class).getProviderRuntimeValues(),
-        new GetFromRuntimeValues<T>(uuid));
+        new GetFromRuntimeValues<>(uuid));
   }
 
   private final Map<String, Object> providerRuntimeValues = Maps.newHashMap();

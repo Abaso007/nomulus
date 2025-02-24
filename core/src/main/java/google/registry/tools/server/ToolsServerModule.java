@@ -16,6 +16,7 @@ package google.registry.tools.server;
 
 import static com.google.common.base.Strings.emptyToNull;
 import static google.registry.request.RequestParameters.extractIntParameter;
+import static google.registry.request.RequestParameters.extractOptionalDatetimeParameter;
 import static google.registry.request.RequestParameters.extractOptionalIntParameter;
 import static google.registry.request.RequestParameters.extractOptionalParameter;
 import static google.registry.request.RequestParameters.extractRequiredParameter;
@@ -23,12 +24,12 @@ import static google.registry.request.RequestParameters.extractRequiredParameter
 import dagger.Module;
 import dagger.Provides;
 import google.registry.request.Parameter;
+import google.registry.tools.server.UpdateUserGroupAction.Mode;
+import jakarta.servlet.http.HttpServletRequest;
 import java.util.Optional;
-import javax.servlet.http.HttpServletRequest;
+import org.joda.time.DateTime;
 
-/**
- * Dagger module for the tools package.
- */
+/** Dagger module for the tools package. */
 @Module
 public class ToolsServerModule {
 
@@ -71,14 +72,31 @@ public class ToolsServerModule {
   }
 
   @Provides
-  @Parameter("jobId")
-  String provideJobId(HttpServletRequest req) {
-    return extractRequiredParameter(req, "jobId");
+  @Parameter("refreshQps")
+  static Optional<Integer> provideRefreshQps(HttpServletRequest req) {
+    return extractOptionalIntParameter(req, "refreshQps");
   }
 
   @Provides
-  @Parameter("batchSize")
-  static Optional<Integer> provideBatchSize(HttpServletRequest req) {
-    return extractOptionalIntParameter(req, "batchSize");
+  @Parameter("activeOrDeletedSince")
+  static Optional<DateTime> provideDeletionTime(HttpServletRequest req) {
+    return extractOptionalDatetimeParameter(req, "activeOrDeletedSince");
+  }
+
+  @Provides
+  static Mode provideGroupUpdateMode(HttpServletRequest req) {
+    return Mode.valueOf(extractRequiredParameter(req, "groupUpdateMode"));
+  }
+
+  @Provides
+  @Parameter("userEmailAddress")
+  static String provideUserEmailAddress(HttpServletRequest req) {
+    return extractRequiredParameter(req, "userEmailAddress");
+  }
+
+  @Provides
+  @Parameter("groupEmailAddress")
+  static String provideGroupEmailAddress(HttpServletRequest req) {
+    return extractRequiredParameter(req, "groupEmailAddress");
   }
 }

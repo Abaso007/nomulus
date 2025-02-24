@@ -21,20 +21,17 @@ import static google.registry.util.DateTimeUtils.END_OF_TIME;
 import google.registry.model.common.TimeOfYear;
 import google.registry.persistence.VKey;
 import google.registry.persistence.WithVKey;
-import google.registry.persistence.converter.JodaMoneyType;
+import jakarta.persistence.AttributeOverride;
+import jakarta.persistence.AttributeOverrides;
+import jakarta.persistence.Column;
+import jakarta.persistence.Embedded;
+import jakarta.persistence.Entity;
+import jakarta.persistence.EnumType;
+import jakarta.persistence.Enumerated;
+import jakarta.persistence.Index;
+import jakarta.persistence.Table;
 import java.util.Optional;
 import javax.annotation.Nullable;
-import javax.persistence.AttributeOverride;
-import javax.persistence.AttributeOverrides;
-import javax.persistence.Column;
-import javax.persistence.Embedded;
-import javax.persistence.Entity;
-import javax.persistence.EnumType;
-import javax.persistence.Enumerated;
-import javax.persistence.Index;
-import javax.persistence.Table;
-import org.hibernate.annotations.Columns;
-import org.hibernate.annotations.Type;
 import org.joda.money.Money;
 import org.joda.time.DateTime;
 
@@ -53,7 +50,8 @@ import org.joda.time.DateTime;
       @Index(columnList = "domainRepoId"),
       @Index(columnList = "recurrenceEndTime"),
       @Index(columnList = "recurrenceLastExpansion"),
-      @Index(columnList = "recurrence_time_of_year")
+      @Index(columnList = "recurrenceTimeOfYear"),
+      @Index(columnList = "domainRepoId,domainHistoryRevisionId")
     })
 @AttributeOverride(name = "id", column = @Column(name = "billing_recurrence_id"))
 @WithVKey(Long.class)
@@ -100,8 +98,11 @@ public class BillingRecurrence extends BillingBase {
    * SPECIFIED. This column is used for internal registrations.
    */
   @Nullable
-  @Type(type = JodaMoneyType.TYPE_NAME)
-  @Columns(columns = {@Column(name = "renewalPriceAmount"), @Column(name = "renewalPriceCurrency")})
+  @AttributeOverride(
+      name = "amount",
+      // Override Hibernate default (numeric(38,2)) to match real schema definition (numeric(19,2)).
+      column = @Column(name = "renewalPriceAmount", precision = 19, scale = 2))
+  @AttributeOverride(name = "currency", column = @Column(name = "renewalPriceCurrency"))
   Money renewalPrice;
 
   @Enumerated(EnumType.STRING)
@@ -181,7 +182,9 @@ public class BillingRecurrence extends BillingBase {
       checkNotNull(instance.reason);
       // Don't require recurrenceLastExpansion to be individually set on every new Recurrence.
       // The correct default value if not otherwise set is the event time of the recurrence minus
-      // 1 year.
+      // 1 year. This operation is leap-year safe as a billing event created on 2/29 will have its
+      // event time on 2/28 next year, and therefore the last expansion time on 2/28 this year. This
+      // ensures that it will be expanded on 2/28 next year and included in the February invoice.
       instance.recurrenceLastExpansion =
           Optional.ofNullable(instance.recurrenceLastExpansion)
               .orElse(instance.eventTime.minusYears(1));

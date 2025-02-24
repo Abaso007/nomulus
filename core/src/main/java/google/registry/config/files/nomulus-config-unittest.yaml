@@ -9,6 +9,10 @@ registryPolicy:
   reservedTermsExportDisclaimer: |
     Disclaimer line 1.
     Line 2 is this 1.
+  tieredPricingPromotionRegistrarIds:
+    - NewRegistrar
+  noPollMessageOnDeletionRegistrarIds:
+    - NewRegistrar
 
 caching:
   singletonCacheRefreshSeconds: 0

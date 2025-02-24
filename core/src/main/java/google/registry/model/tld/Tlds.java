@@ -22,6 +22,7 @@ import static com.google.common.base.Strings.emptyToNull;
 import static com.google.common.collect.ImmutableSet.toImmutableSet;
 import static com.google.common.collect.Maps.filterValues;
 import static google.registry.model.CacheUtils.memoizeWithShortExpiration;
+import static google.registry.model.tld.Tld.isEnrolledWithBsa;
 import static google.registry.persistence.transaction.TransactionManagerFactory.tm;
 import static google.registry.util.CollectionUtils.entriesToImmutableMap;
 import static google.registry.util.PreconditionsUtils.checkArgumentNotNull;
@@ -34,10 +35,11 @@ import com.google.common.collect.Streams;
 import com.google.common.net.InternetDomainName;
 import google.registry.model.tld.Tld.TldType;
 import google.registry.util.DomainNameUtils;
+import jakarta.persistence.EntityManager;
 import java.util.Optional;
 import java.util.function.Supplier;
 import java.util.stream.Stream;
-import javax.persistence.EntityManager;
+import org.joda.time.DateTime;
 
 /** Utilities for finding and listing {@link Tld} entities. */
 public final class Tlds {
@@ -56,7 +58,7 @@ public final class Tlds {
   private static Supplier<ImmutableMap<String, TldType>> createFreshCache() {
     return memoizeWithShortExpiration(
         () ->
-            tm().transact(
+            tm().reTransact(
                     () -> {
                       EntityManager entityManager = tm().getEntityManager();
                       Stream<?> resultStream =
@@ -150,5 +152,10 @@ public final class Tlds {
     return checkArgumentNotNull(
         findTldForName(domainName).orElse(null),
         "Domain name is not under a recognized TLD: %s", domainName.toString());
+  }
+
+  /** Returns true if at least one TLD is enrolled {@code now}. */
+  public static boolean hasActiveBsaEnrollment(DateTime now) {
+    return getTldEntitiesOfType(TldType.REAL).stream().anyMatch(tld -> isEnrolledWithBsa(tld, now));
   }
 }

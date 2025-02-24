@@ -14,12 +14,12 @@
 
 package google.registry.request.auth;
 
-import javax.servlet.http.HttpServletRequest;
+import jakarta.servlet.http.HttpServletRequest;
 
 /**
  * A particular way to authenticate an HTTP request, returning an {@link AuthResult}.
  *
- * <p>For instance, a request could be authenticated using OAuth, via special request headers, etc.
+ * <p>For instance, a request could be authenticated using OIDC, via special request headers, etc.
  */
 public interface AuthenticationMechanism {
 

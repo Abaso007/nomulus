@@ -1,4 +1,4 @@
-// Copyright 2023 The Nomulus Authors. All Rights Reserved.
+// Copyright 2024 The Nomulus Authors. All Rights Reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,67 +12,157 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import { Injectable } from '@angular/core';
+import { Injectable, computed, signal } from '@angular/core';
+import { Observable, switchMap, tap } from 'rxjs';
+
+import { MatSnackBar } from '@angular/material/snack-bar';
+import { Router } from '@angular/router';
+import { OteCreateResponse } from '../ote/newOte.component';
+import { OteStatusResponse } from '../ote/oteStatus.component';
 import { BackendService } from '../shared/services/backend.service';
-import { Subject } from 'rxjs';
 import {
   GlobalLoader,
   GlobalLoaderService,
 } from '../shared/services/globalLoader.service';
 
-interface Address {
-  street?: string[];
-  city?: string;
-  countryCode?: string;
-  zip?: string;
-  state?: string;
+export interface IpAllowListItem {
+  value: string;
 }
 
-export interface Registrar {
+export interface Address {
+  city?: string;
+  countryCode?: string;
+  state?: string;
+  street?: string[];
+  zip?: string;
+}
+
+export interface SecuritySettingsBackendModel {
+  clientCertificate?: string;
+  failoverClientCertificate?: string;
+  ipAddressAllowList?: Array<string>;
+  // TODO: @ptkach At some point we want to add a back-end support for this
+  eppPasswordLastUpdated?: string;
+}
+
+export interface SecuritySettings
+  extends Omit<SecuritySettingsBackendModel, 'ipAddressAllowList'> {
+  ipAddressAllowList?: Array<IpAllowListItem>;
+}
+
+export interface WhoisRegistrarFields {
+  ianaIdentifier?: number;
+  icannReferralEmail: string;
+  localizedAddress: Address;
+  registrarId: string;
+  url: string;
+  whoisServer: string;
+}
+
+export interface Registrar
+  extends WhoisRegistrarFields,
+    SecuritySettingsBackendModel {
   allowedTlds?: string[];
-  ipAddressAllowList?: string[];
-  emailAddress?: string;
   billingAccountMap?: object;
   driveFolderId?: string;
-  ianaIdentifier?: number;
-  icannReferralEmail?: string;
-  localizedAddress?: Address;
+  emailAddress?: string;
+  faxNumber?: string;
+  phoneNumber?: string;
   registrarId: string;
   registrarName: string;
   registryLockAllowed?: boolean;
+  type?: string;
 }
 
 @Injectable({
   providedIn: 'root',
 })
 export class RegistrarService implements GlobalLoader {
-  activeRegistrarId: string = '';
-  registrars: Registrar[] = [];
-  activeRegistrarIdChange: Subject<string> = new Subject<string>();
+  registrarId = signal<string>(
+    new URLSearchParams(document.location.hash.split('?')[1]).get(
+      'registrarId'
+    ) || ''
+  );
+  registrars = signal<Registrar[]>([]);
+  registrar = computed<Registrar | undefined>(() =>
+    this.registrars().find((r) => r.registrarId === this.registrarId())
+  );
+
+  inNewRegistrarMode = signal(false);
+
+  registrarsLoaded: Promise<void>;
 
   constructor(
     private backend: BackendService,
-    private globalLoader: GlobalLoaderService
+    private globalLoader: GlobalLoaderService,
+    private _snackBar: MatSnackBar,
+    private router: Router
   ) {
-    this.backend.getRegistrars().subscribe((r) => {
-      this.globalLoader.stopGlobalLoader(this);
-      this.registrars = r;
+    this.registrarsLoaded = new Promise((resolve) => {
+      this.loadRegistrars().subscribe((r) => {
+        this.globalLoader.stopGlobalLoader(this);
+        resolve();
+      });
     });
     this.globalLoader.startGlobalLoader(this);
   }
 
-  public updateRegistrar(registrarId: string) {
-    this.activeRegistrarId = registrarId;
-    this.activeRegistrarIdChange.next(registrarId);
+  public updateSelectedRegistrar(registrarId: string) {
+    if (registrarId !== this.registrarId()) {
+      this.registrarId.set(registrarId);
+      // add registrarId to url query params, so that we can pick it up after page refresh
+      this.router.navigate([], {
+        queryParams: { registrarId },
+        queryParamsHandling: 'merge',
+      });
+    }
   }
 
-  public get registrar(): Registrar {
-    return this.registrars.filter(
-      (r) => r.registrarId === this.activeRegistrarId
-    )[0];
+  public loadRegistrars(): Observable<Registrar[]> {
+    return this.backend.getRegistrars().pipe(
+      tap((registrars) => {
+        if (registrars) {
+          this.registrars.set(registrars);
+        }
+      })
+    );
+  }
+
+  createRegistrar(registrar: Registrar) {
+    return this.backend
+      .createRegistrar(registrar)
+      .pipe(switchMap((_) => this.loadRegistrars()));
+  }
+
+  updateRegistrar(updatedRegistrar: Registrar) {
+    return this.backend.updateRegistrar(updatedRegistrar).pipe(
+      tap(() => {
+        this.registrars.set(
+          this.registrars().map((r) => {
+            if (r.registrarId === updatedRegistrar.registrarId) {
+              return updatedRegistrar;
+            }
+            return r;
+          })
+        );
+      })
+    );
   }
 
   loadingTimeout() {
-    // TODO: Decide what to do when timeout happens
+    this._snackBar.open('Timeout loading registrars');
+  }
+
+  generateOte(
+    oteForm: Object,
+    registrarId: string
+  ): Observable<OteCreateResponse> {
+    return this.backend
+      .generateOte(oteForm, registrarId)
+      .pipe(tap((_) => this.loadRegistrars()));
+  }
+
+  oteStatus(registrarId: string): Observable<OteStatusResponse[]> {
+    return this.backend.getOteStatus(registrarId);
   }
 }

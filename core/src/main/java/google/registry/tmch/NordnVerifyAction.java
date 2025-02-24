@@ -15,14 +15,15 @@
 package google.registry.tmch;
 
 import static google.registry.request.UrlConnectionUtils.getResponseBytes;
+import static jakarta.servlet.http.HttpServletResponse.SC_NO_CONTENT;
+import static jakarta.servlet.http.HttpServletResponse.SC_OK;
 import static java.nio.charset.StandardCharsets.UTF_8;
-import static javax.servlet.http.HttpServletResponse.SC_NO_CONTENT;
-import static javax.servlet.http.HttpServletResponse.SC_OK;
 
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.flogger.FluentLogger;
 import com.google.common.io.ByteSource;
 import google.registry.request.Action;
+import google.registry.request.Action.GaeService;
 import google.registry.request.HttpException.ConflictException;
 import google.registry.request.Parameter;
 import google.registry.request.RequestParameters;
@@ -50,11 +51,11 @@ import javax.inject.Inject;
  *     http://tools.ietf.org/html/draft-lozano-tmch-func-spec-08#section-5.2.3.3</a>
  */
 @Action(
-    service = Action.Service.BACKEND,
+    service = GaeService.BACKEND,
     path = NordnVerifyAction.PATH,
     method = Action.Method.POST,
     automaticallyPrintOk = true,
-    auth = Auth.AUTH_API_ADMIN)
+    auth = Auth.AUTH_ADMIN)
 public final class NordnVerifyAction implements Runnable {
 
   static final String PATH = "/_dr/task/nordnVerify";
@@ -148,6 +149,8 @@ public final class NordnVerifyAction implements Runnable {
       return log;
     } catch (IOException e) {
       throw new IOException(String.format("Error connecting to MarksDB at URL %s", url), e);
+    } finally {
+      connection.disconnect();
     }
   }
 }

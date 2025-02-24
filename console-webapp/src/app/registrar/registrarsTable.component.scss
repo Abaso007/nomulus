@@ -1,5 +1,39 @@
 .console-app {
-  &__registrars {
-    margin-top: 1.5rem;
+  $min-width: 756px;
+
+  &__registrars-filter {
+    min-width: $min-width !important;
+    width: 100%;
+  }
+
+  &__registrars-table {
+    min-width: $min-width !important;
+  }
+
+  &__registrars-new {
+    margin-left: 20px;
+  }
+
+  &__registrars-header {
+    display: flex;
+    justify-content: space-between;
+  }
+
+  .mat-mdc-paginator {
+    min-width: $min-width !important;
+  }
+
+  .mat-column {
+    &-edit {
+      max-width: 55px;
+      padding-left: 5px;
+    }
+    &-driveId {
+      min-width: 200px;
+      word-break: break-word;
+    }
+    &-registryLockAllowed {
+      max-width: 80px;
+    }
   }
 }

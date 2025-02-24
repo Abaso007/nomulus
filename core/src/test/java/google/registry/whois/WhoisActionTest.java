@@ -15,10 +15,10 @@
 package google.registry.whois;
 
 import static com.google.common.truth.Truth.assertThat;
-import static com.google.common.truth.Truth8.assertThat;
+import static google.registry.bsa.persistence.BsaTestingUtils.persistBsaLabel;
 import static google.registry.model.EppResourceUtils.loadByForeignKeyCached;
-import static google.registry.model.registrar.Registrar.State.ACTIVE;
-import static google.registry.model.registrar.Registrar.Type.PDT;
+import static google.registry.model.registrar.RegistrarBase.State.ACTIVE;
+import static google.registry.model.registrar.RegistrarBase.Type.PDT;
 import static google.registry.model.tld.Tlds.getTlds;
 import static google.registry.testing.DatabaseHelper.createTlds;
 import static google.registry.testing.DatabaseHelper.loadRegistrar;
@@ -29,9 +29,9 @@ import static google.registry.testing.FullFieldsTestEntityHelper.makeDomain;
 import static google.registry.testing.FullFieldsTestEntityHelper.makeRegistrar;
 import static google.registry.testing.FullFieldsTestEntityHelper.makeRegistrarPocs;
 import static google.registry.whois.WhoisTestData.loadFile;
-import static javax.servlet.http.HttpServletResponse.SC_INTERNAL_SERVER_ERROR;
-import static javax.servlet.http.HttpServletResponse.SC_NOT_FOUND;
-import static javax.servlet.http.HttpServletResponse.SC_OK;
+import static jakarta.servlet.http.HttpServletResponse.SC_INTERNAL_SERVER_ERROR;
+import static jakarta.servlet.http.HttpServletResponse.SC_NOT_FOUND;
+import static jakarta.servlet.http.HttpServletResponse.SC_OK;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
@@ -61,6 +61,7 @@ import java.io.IOException;
 import java.io.Reader;
 import java.io.StringReader;
 import java.time.Duration;
+import java.util.Optional;
 import org.joda.time.DateTime;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Disabled;
@@ -91,7 +92,8 @@ public class WhoisActionTest {
     whoisAction.input = new StringReader(input);
     whoisAction.response = response;
     whoisAction.whoisReader =
-        new WhoisReader(WhoisCommandFactory.createCached(), "Please contact registrar");
+        new WhoisReader(
+            WhoisCommandFactory.createCached(), "Please contact registrar", "Blocked by BSA: %s");
     whoisAction.whoisMetrics = new WhoisMetrics();
     whoisAction.metricBuilder = WhoisMetric.builderForRequest(clock);
     whoisAction.disclaimer =
@@ -162,6 +164,37 @@ public class WhoisActionTest {
     newWhoisAction("domain cat.lol\r\n").run();
     assertThat(response.getStatus()).isEqualTo(200);
     assertThat(response.getPayload()).isEqualTo(loadFile("whois_action_domain.txt"));
+  }
+
+  @Test
+  void testRun_domainQuery_registeredDomainUnaffectedByBsa() {
+    persistResource(
+        Tld.get("lol")
+            .asBuilder()
+            .setBsaEnrollStartTime(Optional.of(clock.nowUtc().minusDays(1)))
+            .build());
+    persistBsaLabel("cat");
+
+    Registrar registrar = persistResource(makeRegistrar("evilregistrar", "Yes Virginia", ACTIVE));
+    persistResource(makeDomainWithRegistrar(registrar));
+    persistSimpleResources(makeRegistrarPocs(registrar));
+    newWhoisAction("domain cat.lol\r\n").run();
+    assertThat(response.getStatus()).isEqualTo(200);
+    assertThat(response.getPayload()).isEqualTo(loadFile("whois_action_domain.txt"));
+  }
+
+  @Test
+  void testRun_domainQuery_unregisteredDomainShowBsaMessage() {
+    persistResource(
+        Tld.get("lol")
+            .asBuilder()
+            .setBsaEnrollStartTime(Optional.of(clock.nowUtc().minusDays(1)))
+            .build());
+    persistBsaLabel("cat");
+
+    newWhoisAction("domain cat.lol\r\n").run();
+    assertThat(response.getStatus()).isEqualTo(200);
+    assertThat(response.getPayload()).isEqualTo(loadFile("whois_action_domain_blocked_by_bsa.txt"));
   }
 
   @Test

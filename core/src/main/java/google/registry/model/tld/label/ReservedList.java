@@ -35,18 +35,18 @@ import google.registry.model.Buildable;
 import google.registry.model.CacheUtils;
 import google.registry.model.tld.Tld;
 import google.registry.model.tld.label.DomainLabelMetrics.MetricsReservedListMatch;
+import jakarta.persistence.Column;
+import jakarta.persistence.Id;
+import jakarta.persistence.Index;
+import jakarta.persistence.PostPersist;
+import jakarta.persistence.PreRemove;
+import jakarta.persistence.Table;
+import jakarta.persistence.Transient;
 import java.io.Serializable;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import javax.annotation.Nullable;
-import javax.persistence.Column;
-import javax.persistence.Id;
-import javax.persistence.Index;
-import javax.persistence.PostPersist;
-import javax.persistence.PreRemove;
-import javax.persistence.Table;
-import javax.persistence.Transient;
 import org.joda.time.DateTime;
 
 /**
@@ -57,28 +57,23 @@ import org.joda.time.DateTime;
  * succeeds, we will end up with having two exact same reserved lists that differ only by
  * revisionId. This is fine though, because we only use the list with the highest revisionId.
  */
-@javax.persistence.Entity
+@jakarta.persistence.Entity
 @Table(indexes = {@Index(columnList = "name", name = "reservedlist_name_idx")})
 public final class ReservedList
     extends BaseDomainLabelList<ReservationType, ReservedList.ReservedListEntry> {
 
   /**
-   * Mapping from domain name to its reserved list info.
+   * Mapping from domain label to its reserved list info.
    *
    * <p>This field requires special treatment since we want to lazy load it. We have to remove it
    * from the immutability contract so we can modify it after construction and we have to handle the
    * database processing on our own so we can detach it after load.
    */
-  @Insignificant
-  @Transient
-  Map<String, ReservedListEntry> reservedListMap;
-
-  @Column(nullable = false)
-  boolean shouldPublish = true;
+  @Insignificant @Transient Map<String, ReservedListEntry> reservedListMap;
 
   @PreRemove
   void preRemove() {
-    tm().query("DELETE FROM ReservedEntry WHERE revision_id = :revisionId")
+    tm().query("DELETE FROM ReservedEntry WHERE revisionId = :revisionId")
         .setParameter("revisionId", revisionId)
         .executeUpdate();
   }
@@ -109,13 +104,16 @@ public final class ReservedList
    * A reserved list entry entity, persisted to the database, that represents a single label and its
    * reservation type.
    */
-  @javax.persistence.Entity(name = "ReservedEntry")
+  @jakarta.persistence.Entity(name = "ReservedEntry")
   public static class ReservedListEntry extends DomainLabelEntry<ReservationType, ReservedListEntry>
       implements Buildable, Serializable {
 
     @Insignificant @Id Long revisionId;
 
-    @Column(nullable = false)
+    // This Enum field was mapped (unintended) by ordinal and is an int column in the real schema.
+    // In Hibernate 6, ordinal enum field is mapped to smallint instead of int. We override the def
+    // so that the generated schema is consistent with the real schema.
+    @Column(nullable = false, columnDefinition = "integer")
     ReservationType reservationType;
 
     String comment;
@@ -183,14 +181,6 @@ public final class ReservedList
   }
 
   /**
-   * Returns whether this reserved list is included in the concatenated list of reserved terms
-   * published to Google Drive for viewing by registrars.
-   */
-  public boolean getShouldPublish() {
-    return shouldPublish;
-  }
-
-  /**
    * Returns a {@link Map} of domain labels to {@link ReservedListEntry}.
    *
    * <p>Note that this involves a database fetch of a potentially large number of elements and
@@ -199,7 +189,7 @@ public final class ReservedList
   public synchronized ImmutableMap<String, ReservedListEntry> getReservedListEntries() {
     if (reservedListMap == null) {
       reservedListMap =
-          tm().transact(
+          tm().reTransact(
                   () ->
                       tm()
                           .createQueryComposer(ReservedListEntry.class)
@@ -269,7 +259,7 @@ public final class ReservedList
   }
 
   /** Loads and returns the reserved lists with the given names, skipping those that don't exist. */
-  private static ImmutableSet<ReservedList> loadReservedLists(
+  public static ImmutableSet<ReservedList> loadReservedLists(
       ImmutableSet<String> reservedListNames) {
     return cache.getAll(reservedListNames).values().stream()
         .filter(Optional::isPresent)
@@ -329,11 +319,6 @@ public final class ReservedList
 
     public Builder setReservedListMap(ImmutableMap<String, ReservedListEntry> reservedListMap) {
       getInstance().reservedListMap = reservedListMap;
-      return this;
-    }
-
-    public Builder setShouldPublish(boolean shouldPublish) {
-      getInstance().shouldPublish = shouldPublish;
       return this;
     }
 

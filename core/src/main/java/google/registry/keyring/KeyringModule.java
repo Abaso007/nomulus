@@ -14,28 +14,41 @@
 
 package google.registry.keyring;
 
-import static com.google.common.base.Preconditions.checkState;
-
+import dagger.Binds;
 import dagger.Module;
 import dagger.Provides;
 import google.registry.config.RegistryConfig.Config;
 import google.registry.keyring.api.Keyring;
-import java.util.Map;
+import google.registry.keyring.secretmanager.SecretManagerKeyring;
+import java.util.Optional;
 import javax.inject.Singleton;
 
 /** Dagger module for {@link Keyring} */
 @Module
-public final class KeyringModule {
+public abstract class KeyringModule {
+
+  @Binds
+  @Singleton
+  public abstract Keyring provideKeyring(SecretManagerKeyring keyring);
 
   @Provides
-  @Singleton
-  public static Keyring provideKeyring(
-      Map<String, Keyring> keyrings, @Config("activeKeyring") String activeKeyring) {
-    checkState(
-        keyrings.containsKey(activeKeyring),
-        "Invalid Keyring %s is configured; valid choices are %s",
-        activeKeyring,
-        keyrings.keySet());
-    return keyrings.get(activeKeyring);
+  @Config("cloudSqlInstanceConnectionName")
+  public static String provideCloudSqlInstanceConnectionName(Keyring keyring) {
+    return keyring.getSqlPrimaryConnectionName();
+  }
+
+  @Provides
+  @Config("cloudSqlReplicaInstanceConnectionName")
+  public static Optional<String> provideCloudSqlReplicaInstanceConnectionName(Keyring keyring) {
+    return Optional.ofNullable(keyring.getSqlReplicaConnectionName());
+  }
+
+  @Provides
+  @Config("cloudSqlDbInstanceName")
+  public static String provideCloudSqlDbInstance(
+      @Config("cloudSqlInstanceConnectionName") String instanceConnectionName) {
+    // Format of instanceConnectionName: project-id:region:instance-name
+    int lastColonIndex = instanceConnectionName.lastIndexOf(':');
+    return instanceConnectionName.substring(lastColonIndex + 1);
   }
 }

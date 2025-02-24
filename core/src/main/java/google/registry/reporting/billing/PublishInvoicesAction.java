@@ -16,10 +16,10 @@ package google.registry.reporting.billing;
 
 import static google.registry.reporting.ReportingModule.PARAM_YEAR_MONTH;
 import static google.registry.request.Action.Method.POST;
-import static javax.servlet.http.HttpServletResponse.SC_INTERNAL_SERVER_ERROR;
-import static javax.servlet.http.HttpServletResponse.SC_NO_CONTENT;
-import static javax.servlet.http.HttpServletResponse.SC_OK;
-import static javax.servlet.http.HttpServletResponse.SC_SERVICE_UNAVAILABLE;
+import static jakarta.servlet.http.HttpServletResponse.SC_INTERNAL_SERVER_ERROR;
+import static jakarta.servlet.http.HttpServletResponse.SC_NO_CONTENT;
+import static jakarta.servlet.http.HttpServletResponse.SC_OK;
+import static jakarta.servlet.http.HttpServletResponse.SC_SERVICE_UNAVAILABLE;
 
 import com.google.api.services.dataflow.Dataflow;
 import com.google.api.services.dataflow.model.Job;
@@ -30,7 +30,7 @@ import google.registry.batch.CloudTasksUtils;
 import google.registry.config.RegistryConfig.Config;
 import google.registry.reporting.ReportingModule;
 import google.registry.request.Action;
-import google.registry.request.Action.Service;
+import google.registry.request.Action.GaeService;
 import google.registry.request.Parameter;
 import google.registry.request.Response;
 import google.registry.request.auth.Auth;
@@ -49,10 +49,10 @@ import org.joda.time.YearMonth;
  *     Job States</a>
  */
 @Action(
-    service = Action.Service.BACKEND,
+    service = GaeService.BACKEND,
     path = PublishInvoicesAction.PATH,
     method = POST,
-    auth = Auth.AUTH_API_ADMIN)
+    auth = Auth.AUTH_ADMIN)
 public class PublishInvoicesAction implements Runnable {
 
   private static final FluentLogger logger = FluentLogger.forEnclosingClass();
@@ -97,22 +97,22 @@ public class PublishInvoicesAction implements Runnable {
       Job job = dataflow.projects().locations().jobs().get(projectId, jobRegion, jobId).execute();
       String state = job.getCurrentState();
       switch (state) {
-        case JOB_DONE:
+        case JOB_DONE -> {
           logger.atInfo().log("Dataflow job %s finished successfully, publishing results.", jobId);
           response.setStatus(SC_OK);
           enqueueCopyDetailReportsTask();
           emailUtils.emailOverallInvoice();
-          break;
-        case JOB_FAILED:
+        }
+        case JOB_FAILED -> {
           logger.atSevere().log("Dataflow job %s finished unsuccessfully.", jobId);
           response.setStatus(SC_NO_CONTENT);
           emailUtils.sendAlertEmail(
               String.format("Dataflow job %s ended in status failure.", jobId));
-          break;
-        default:
+        }
+        default -> {
           logger.atInfo().log("Job in non-terminal state %s, retrying:", state);
           response.setStatus(SC_SERVICE_UNAVAILABLE);
-          break;
+        }
       }
     } catch (IOException e) {
       emailUtils.sendAlertEmail(String.format("Publish action failed due to %s", e.getMessage()));
@@ -125,9 +125,9 @@ public class PublishInvoicesAction implements Runnable {
   private void enqueueCopyDetailReportsTask() {
     cloudTasksUtils.enqueue(
         BillingModule.CRON_QUEUE,
-        cloudTasksUtils.createPostTask(
-            CopyDetailReportsAction.PATH,
-            Service.BACKEND,
+        cloudTasksUtils.createTask(
+            CopyDetailReportsAction.class,
+            POST,
             ImmutableMultimap.of(PARAM_YEAR_MONTH, yearMonth.toString())));
   }
 }

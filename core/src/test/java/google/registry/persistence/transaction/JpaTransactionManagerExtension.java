@@ -18,6 +18,7 @@ import static com.google.common.base.Preconditions.checkState;
 import static com.google.common.collect.ImmutableList.toImmutableList;
 import static com.google.common.truth.Truth.assertWithMessage;
 import static google.registry.testing.DatabaseHelper.insertSimpleResources;
+import static java.nio.charset.StandardCharsets.UTF_8;
 import static org.testcontainers.containers.PostgreSQLContainer.POSTGRESQL_PORT;
 
 import com.google.common.base.Charsets;
@@ -30,9 +31,10 @@ import com.google.common.collect.Maps;
 import com.google.common.collect.Streams;
 import com.google.common.io.Resources;
 import google.registry.model.registrar.Registrar;
-import google.registry.model.registrar.Registrar.State;
 import google.registry.model.registrar.RegistrarAddress;
+import google.registry.model.registrar.RegistrarBase.State;
 import google.registry.model.registrar.RegistrarPoc;
+import google.registry.model.registrar.RegistrarPocBase;
 import google.registry.persistence.HibernateSchemaExporter;
 import google.registry.persistence.NomulusPostgreSql;
 import google.registry.persistence.PersistenceModule;
@@ -40,6 +42,8 @@ import google.registry.persistence.PersistenceXmlUtility;
 import google.registry.persistence.transaction.JpaTestExtensions.JpaIntegrationTestExtension;
 import google.registry.persistence.transaction.JpaTestExtensions.JpaUnitTestExtension;
 import google.registry.util.Clock;
+import jakarta.persistence.Entity;
+import jakarta.persistence.EntityManagerFactory;
 import java.io.File;
 import java.io.IOException;
 import java.io.UncheckedIOException;
@@ -55,10 +59,7 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.Properties;
 import java.util.TimeZone;
-import java.util.stream.Collectors;
 import java.util.stream.Stream;
-import javax.persistence.Entity;
-import javax.persistence.EntityManagerFactory;
 import org.hibernate.cfg.Environment;
 import org.hibernate.jpa.boot.internal.ParsedPersistenceXmlDescriptor;
 import org.hibernate.jpa.boot.spi.Bootstrap;
@@ -88,7 +89,7 @@ public abstract class JpaTransactionManagerExtension
       "google/registry/persistence/transaction/cleanup_database.sql";
   private static final String POSTGRES_DB_NAME = "postgres";
   // The type of JDBC connections started by the tests. This string value
-  // is documented in PSQL's official user guide.
+  // is documented in PostgreSQL's official user guide.
   private static final String CONNECTION_BACKEND_TYPE = "client backend";
   private static final int ACTIVE_CONNECTIONS_CAP = 5;
 
@@ -97,7 +98,7 @@ public abstract class JpaTransactionManagerExtension
   private final ImmutableList<Class<?>> extraEntityClasses;
   private final ImmutableMap<String, String> userProperties;
 
-  private static final JdbcDatabaseContainer database = create();
+  private static final JdbcDatabaseContainer<?> database = create();
   private static final HibernateSchemaExporter exporter =
       HibernateSchemaExporter.create(
           database.getJdbcUrl(), database.getUsername(), database.getPassword());
@@ -105,6 +106,7 @@ public abstract class JpaTransactionManagerExtension
   // reused between test methods if the requested schema remains the same.
   private static EntityManagerFactory emf;
   // Hash of the ORM entity names in the current schema in the test db.
+
   private static int emfEntityHash;
 
   private JpaTransactionManager cachedTm;
@@ -115,7 +117,7 @@ public abstract class JpaTransactionManagerExtension
   // to false.
   private boolean includeNomulusSchema = true;
 
-  // Whether to pre-polulate some registrars for ease of testing.
+  // Whether to pre-populate some registrars for ease of testing.
   private final boolean withCannedData;
 
   private TimeZone originalDefaultTimeZone;
@@ -136,9 +138,9 @@ public abstract class JpaTransactionManagerExtension
     this.withCannedData = withCannedData;
   }
 
-  private static JdbcDatabaseContainer create() {
-    PostgreSQLContainer container =
-        new PostgreSQLContainer(NomulusPostgreSql.getDockerTag())
+  private static JdbcDatabaseContainer<?> create() {
+    PostgreSQLContainer<?> container =
+        new PostgreSQLContainer<>(NomulusPostgreSql.getDockerImageName())
             .withDatabaseName(POSTGRES_DB_NAME);
     container.start();
     return container;
@@ -150,7 +152,7 @@ public abstract class JpaTransactionManagerExtension
             Stream.of(initScriptPath.orElse("")),
             extraEntityClasses.stream().map(Class::getCanonicalName))
         .sorted()
-        .collect(Collectors.toList())
+        .toList()
         .hashCode();
   }
 
@@ -171,7 +173,7 @@ public abstract class JpaTransactionManagerExtension
       File tempSqlFile = File.createTempFile("tempSqlFile", ".sql");
       tempSqlFile.deleteOnExit();
       exporter.export(extraEntityClasses, tempSqlFile);
-      executeSql(Files.readString(tempSqlFile.toPath()));
+      executeSql(Files.readString(tempSqlFile.toPath(), UTF_8));
     }
     assertReasonableNumDbConnections();
     emf = createEntityManagerFactory(getJpaProperties());
@@ -180,9 +182,9 @@ public abstract class JpaTransactionManagerExtension
 
   /**
    * Returns the full set of properties for setting up JPA {@link EntityManagerFactory} to the test
-   * database. This allows creation of customized JPA by individual tests.
+   * database. This allows the creation of customized JPA by individual tests.
    *
-   * <p>Test that create {@code EntityManagerFactory} instances are reponsible for tearing them
+   * <p>Test that create {@code EntityManagerFactory} instances are responsible for tearing them
    * down.
    */
   public ImmutableMap<String, String> getJpaProperties() {
@@ -219,10 +221,10 @@ public abstract class JpaTransactionManagerExtension
       recreateSchema();
     }
     JpaTransactionManagerImpl txnManager = new JpaTransactionManagerImpl(emf, clock);
+    JpaTransactionManagerImpl readOnlyTxnManager = new JpaTransactionManagerImpl(emf, clock, true);
     cachedTm = TransactionManagerFactory.tm();
     TransactionManagerFactory.setJpaTm(Suppliers.ofInstance(txnManager));
-    TransactionManagerFactory.setReplicaJpaTm(
-        Suppliers.ofInstance(new ReplicaSimulatingJpaTransactionManager(txnManager)));
+    TransactionManagerFactory.setReplicaJpaTm(Suppliers.ofInstance(readOnlyTxnManager));
     // Reset SQL Sequence based id allocation so that ids are deterministic in tests.
     TransactionManagerFactory.tm()
         .transact(
@@ -246,7 +248,7 @@ public abstract class JpaTransactionManagerExtension
     TimeZone.setDefault(originalDefaultTimeZone);
   }
 
-  public JdbcDatabaseContainer getDatabase() {
+  public JdbcDatabaseContainer<?> getDatabase() {
     return database;
   }
 
@@ -272,11 +274,11 @@ public abstract class JpaTransactionManagerExtension
   }
 
   /**
-   * Asserts that the number of connections to the test database is reasonable, i.e. less than 5.
+   * Asserts that the number of connections to the test database is reasonable, i.e., less than 5.
    * Ideally, it should be 0 if the connection is closed by the test as we don't use a connection
-   * pool. However, Hibernate may still maintain some connection by it self. In addition, the
+   * pool. However, Hibernate may still maintain some connection by itself. In addition, the
    * metadata table we use to detect active connection may not remove the closed connection
-   * immediately. So, we decide to relax the condition to check if the number of active connection
+   * immediately. So, we decide to relax the condition to check if the number of active connections
    * is less than 5 to reduce flakiness.
    */
   private void assertReasonableNumDbConnections() {
@@ -357,7 +359,7 @@ public abstract class JpaTransactionManagerExtension
                 .build())
         .setLocalizedAddress(
             new RegistrarAddress.Builder()
-                .setStreet(ImmutableList.of("123 Example B\u0151ulevard"))
+                .setStreet(ImmutableList.of("123 Example Bőulevard"))
                 .setCity("Williamsburg")
                 .setState("NY")
                 .setZip("11211")
@@ -409,7 +411,7 @@ public abstract class JpaTransactionManagerExtension
         .setVisibleInWhoisAsTech(false)
         .setEmailAddress("janedoe@theregistrar.com")
         .setPhoneNumber("+1.1234567890")
-        .setTypes(ImmutableSet.of(RegistrarPoc.Type.ADMIN))
+        .setTypes(ImmutableSet.of(RegistrarPocBase.Type.ADMIN))
         .build();
   }
 
@@ -423,8 +425,7 @@ public abstract class JpaTransactionManagerExtension
         .setName("John Doe")
         .setEmailAddress("johndoe@theregistrar.com")
         .setPhoneNumber("+1.1234567890")
-        .setTypes(ImmutableSet.of(RegistrarPoc.Type.ADMIN))
-        .setLoginEmailAddress("johndoe@theregistrar.com")
+        .setTypes(ImmutableSet.of(RegistrarPocBase.Type.ADMIN))
         .build();
   }
 
@@ -435,8 +436,7 @@ public abstract class JpaTransactionManagerExtension
         .setEmailAddress("Marla.Singer@crr.com")
         .setRegistryLockEmailAddress("Marla.Singer.RegistryLock@crr.com")
         .setPhoneNumber("+1.2128675309")
-        .setTypes(ImmutableSet.of(RegistrarPoc.Type.TECH))
-        .setLoginEmailAddress("Marla.Singer@crr.com")
+        .setTypes(ImmutableSet.of(RegistrarPocBase.Type.TECH))
         .setAllowedToSetRegistryLockPassword(true)
         .setRegistryLockPassword("hi")
         .build();

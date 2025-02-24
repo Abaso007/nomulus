@@ -14,39 +14,42 @@
 
 package google.registry.ui.server.console.settings;
 
+import static com.google.common.base.Preconditions.checkArgument;
 import static google.registry.persistence.transaction.TransactionManagerFactory.tm;
 import static google.registry.request.Action.Method.POST;
+import static jakarta.servlet.http.HttpServletResponse.SC_BAD_REQUEST;
+import static jakarta.servlet.http.HttpServletResponse.SC_FORBIDDEN;
+import static jakarta.servlet.http.HttpServletResponse.SC_OK;
 
-import avro.shaded.com.google.common.collect.ImmutableList;
-import com.google.api.client.http.HttpStatusCodes;
-import com.google.gson.Gson;
+import com.google.common.collect.ImmutableSet;
 import google.registry.flows.certs.CertificateChecker;
 import google.registry.flows.certs.CertificateChecker.InsecureCertificateException;
 import google.registry.model.console.ConsolePermission;
+import google.registry.model.console.ConsoleUpdateHistory;
+import google.registry.model.console.RegistrarUpdateHistory;
 import google.registry.model.console.User;
 import google.registry.model.registrar.Registrar;
 import google.registry.request.Action;
+import google.registry.request.Action.GaeService;
+import google.registry.request.Action.GkeService;
 import google.registry.request.Parameter;
-import google.registry.request.Response;
 import google.registry.request.auth.Auth;
-import google.registry.request.auth.AuthResult;
 import google.registry.request.auth.AuthenticatedRegistrarAccessor;
 import google.registry.request.auth.AuthenticatedRegistrarAccessor.RegistrarAccessDeniedException;
-import google.registry.ui.server.registrar.JsonGetAction;
+import google.registry.ui.server.console.ConsoleApiAction;
+import google.registry.ui.server.console.ConsoleApiParams;
 import java.util.Optional;
 import javax.inject.Inject;
 
 @Action(
-    service = Action.Service.DEFAULT,
+    service = GaeService.DEFAULT,
+    gkeService = GkeService.CONSOLE,
     path = SecurityAction.PATH,
     method = {POST},
     auth = Auth.AUTH_PUBLIC_LOGGED_IN)
-public class SecurityAction implements JsonGetAction {
+public class SecurityAction extends ConsoleApiAction {
 
   static final String PATH = "/console-api/settings/security";
-  private final AuthResult authResult;
-  private final Response response;
-  private final Gson gson;
   private final String registrarId;
   private final AuthenticatedRegistrarAccessor registrarAccessor;
   private final Optional<Registrar> registrar;
@@ -54,16 +57,12 @@ public class SecurityAction implements JsonGetAction {
 
   @Inject
   public SecurityAction(
-      AuthResult authResult,
-      Response response,
-      Gson gson,
+      ConsoleApiParams consoleApiParams,
       CertificateChecker certificateChecker,
       AuthenticatedRegistrarAccessor registrarAccessor,
       @Parameter("registrarId") String registrarId,
       @Parameter("registrar") Optional<Registrar> registrar) {
-    this.authResult = authResult;
-    this.response = response;
-    this.gson = gson;
+    super(consoleApiParams);
     this.registrarId = registrarId;
     this.registrarAccessor = registrarAccessor;
     this.registrar = registrar;
@@ -71,25 +70,15 @@ public class SecurityAction implements JsonGetAction {
   }
 
   @Override
-  public void run() {
-    User user = authResult.userAuthInfo().get().consoleUser().get();
-    if (!user.getUserRoles().hasPermission(registrarId, ConsolePermission.EDIT_REGISTRAR_DETAILS)) {
-      response.setStatus(HttpStatusCodes.STATUS_CODE_FORBIDDEN);
-      return;
-    }
-
-    if (!registrar.isPresent()) {
-      response.setStatus(HttpStatusCodes.STATUS_CODE_BAD_REQUEST);
-      response.setPayload(gson.toJson("'registrar' parameter is not present"));
-      return;
-    }
+  protected void postHandler(User user) {
+    checkPermission(user, registrarId, ConsolePermission.EDIT_REGISTRAR_DETAILS);
+    checkArgument(registrar.isPresent(), "'registrar' parameter is not present");
 
     Registrar savedRegistrar;
     try {
       savedRegistrar = registrarAccessor.getRegistrar(registrarId);
     } catch (RegistrarAccessDeniedException e) {
-      response.setStatus(HttpStatusCodes.STATUS_CODE_FORBIDDEN);
-      response.setPayload(e.getMessage());
+      setFailedResponse(e.getMessage(), SC_FORBIDDEN);
       return;
     }
 
@@ -98,48 +87,46 @@ public class SecurityAction implements JsonGetAction {
 
   private void setResponse(Registrar savedRegistrar) {
     Registrar registrarParameter = registrar.get();
-    Registrar.Builder updatedRegistrar =
+    Registrar.Builder updatedRegistrarBuilder =
         savedRegistrar
             .asBuilder()
             .setIpAddressAllowList(registrarParameter.getIpAddressAllowList());
 
-    boolean hasInvalidCerts =
-        ImmutableList.of(
-                registrarParameter.getClientCertificate(),
-                registrarParameter.getFailoverClientCertificate())
-            .stream()
-            .filter(Optional::isPresent)
-            .map(Optional::get)
-            .anyMatch(
-                cert -> {
-                  try {
-                    certificateChecker.validateCertificate(cert);
-                    return false;
-                  } catch (InsecureCertificateException e) {
-                    return true;
-                  }
-                });
-
-    if (hasInvalidCerts) {
-      response.setStatus(HttpStatusCodes.STATUS_CODE_BAD_REQUEST);
-      response.setPayload("Insecure Certificate in parameter");
+    try {
+      if (!savedRegistrar
+          .getClientCertificate()
+          .equals(registrarParameter.getClientCertificate())) {
+        if (registrarParameter.getClientCertificate().isPresent()) {
+          String newClientCert = registrarParameter.getClientCertificate().get();
+          certificateChecker.validateCertificate(newClientCert);
+          updatedRegistrarBuilder.setClientCertificate(newClientCert, tm().getTransactionTime());
+        }
+      }
+      if (!savedRegistrar
+          .getFailoverClientCertificate()
+          .equals(registrarParameter.getFailoverClientCertificate())) {
+        if (registrarParameter.getFailoverClientCertificate().isPresent()) {
+          String newFailoverCert = registrarParameter.getFailoverClientCertificate().get();
+          certificateChecker.validateCertificate(newFailoverCert);
+          updatedRegistrarBuilder.setFailoverClientCertificate(
+              newFailoverCert, tm().getTransactionTime());
+        }
+      }
+    } catch (InsecureCertificateException e) {
+      setFailedResponse("Invalid certificate in parameter", SC_BAD_REQUEST);
       return;
     }
 
-    registrarParameter
-        .getClientCertificate()
-        .ifPresent(
-            newClientCert ->
-                updatedRegistrar.setClientCertificate(newClientCert, tm().getTransactionTime()));
+    Registrar updatedRegistrar = updatedRegistrarBuilder.build();
+    tm().put(updatedRegistrar);
+    finishAndPersistConsoleUpdateHistory(
+        new RegistrarUpdateHistory.Builder()
+            .setType(ConsoleUpdateHistory.Type.REGISTRAR_UPDATE)
+            .setRegistrar(updatedRegistrar)
+            .setRequestBody(consoleApiParams.gson().toJson(registrar.get())));
 
-    registrarParameter
-        .getFailoverClientCertificate()
-        .ifPresent(
-            failoverCert ->
-                updatedRegistrar.setFailoverClientCertificate(
-                    failoverCert, tm().getTransactionTime()));
-
-    tm().put(updatedRegistrar.build());
-    response.setStatus(HttpStatusCodes.STATUS_CODE_OK);
+    sendExternalUpdatesIfNecessary(
+        EmailInfo.create(savedRegistrar, updatedRegistrar, ImmutableSet.of(), ImmutableSet.of()));
+    consoleApiParams.response().setStatus(SC_OK);
   }
 }

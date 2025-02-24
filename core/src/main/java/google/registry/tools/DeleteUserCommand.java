@@ -14,20 +14,30 @@
 
 package google.registry.tools;
 
+import static com.google.api.client.util.Preconditions.checkArgument;
 import static google.registry.persistence.transaction.TransactionManagerFactory.tm;
 import static google.registry.util.PreconditionsUtils.checkArgumentNotNull;
-import static google.registry.util.PreconditionsUtils.checkArgumentPresent;
 
 import com.beust.jcommander.Parameter;
 import com.beust.jcommander.Parameters;
+import google.registry.config.RegistryConfig.Config;
 import google.registry.model.console.User;
-import google.registry.model.console.UserDao;
+import google.registry.persistence.VKey;
 import java.util.Optional;
 import javax.annotation.Nullable;
+import javax.inject.Inject;
 
 /** Deletes a {@link User}. */
 @Parameters(separators = " =", commandDescription = "Delete a user account")
-public class DeleteUserCommand extends ConfirmingCommand {
+public class DeleteUserCommand extends ConfirmingCommand implements CommandWithConnection {
+
+  private ServiceConnection connection;
+
+  @Inject IamClient iamClient;
+
+  @Inject
+  @Config("gSuiteConsoleUserGroupEmailAddress")
+  Optional<String> maybeGroupEmailAddress;
 
   @Nullable
   @Parameter(names = "--email", description = "Email address of the user", required = true)
@@ -36,7 +46,9 @@ public class DeleteUserCommand extends ConfirmingCommand {
   @Override
   protected String prompt() {
     checkArgumentNotNull(email, "Email must be provided");
-    checkArgumentPresent(UserDao.loadUser(email), "Email does not correspond to a valid user");
+    checkArgument(
+        tm().transact(() -> tm().exists(VKey.create(User.class, email))),
+        "Email does not correspond to a valid user");
     return String.format("Delete user with email %s?", email);
   }
 
@@ -44,10 +56,16 @@ public class DeleteUserCommand extends ConfirmingCommand {
   protected String execute() throws Exception {
     tm().transact(
             () -> {
-              Optional<User> optionalUser = UserDao.loadUser(email);
-              checkArgumentPresent(optionalUser, "Email no longer corresponds to a valid user");
-              tm().delete(optionalUser.get());
+              VKey<User> key = VKey.create(User.class, email);
+              checkArgument(tm().exists(key), "Email no longer corresponds to a valid user");
+              tm().delete(key);
             });
+    User.revokeIapPermission(email, maybeGroupEmailAddress, null, connection, iamClient);
     return String.format("Deleted user with email %s", email);
+  }
+
+  @Override
+  public void setConnection(ServiceConnection connection) {
+    this.connection = connection;
   }
 }

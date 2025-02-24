@@ -18,7 +18,6 @@ import static com.google.common.collect.ImmutableList.toImmutableList;
 import static com.google.common.collect.ImmutableSet.toImmutableSet;
 import static com.google.common.collect.Iterables.partition;
 import static com.google.common.collect.Streams.stream;
-import static google.registry.model.domain.token.AllocationToken.TokenType.SINGLE_USE;
 import static google.registry.persistence.transaction.TransactionManagerFactory.tm;
 
 import com.beust.jcommander.Parameter;
@@ -53,7 +52,7 @@ final class DeleteAllocationTokensCommand extends UpdateOrDeleteAllocationTokens
 
   @Override
   public void init() {
-    tokensToDelete = getTokenKeys(tokens, prefix);
+    tokensToDelete = tm().transact(() -> getTokenKeys(tokens, prefix));
   }
 
   @Override
@@ -77,15 +76,15 @@ final class DeleteAllocationTokensCommand extends UpdateOrDeleteAllocationTokens
     // since the query ran. This also filters out per-domain tokens if they're not to be deleted.
     ImmutableSet<VKey<AllocationToken>> tokensToDelete =
         tm().loadByKeys(batch).values().stream()
-            .filter(t -> withDomains || !t.getDomainName().isPresent())
-            .filter(t -> SINGLE_USE.equals(t.getTokenType()))
+            .filter(t -> withDomains || t.getDomainName().isEmpty())
+            .filter(t -> t.getTokenType().isOneTimeUse())
             .filter(t -> !t.isRedeemed())
             .map(AllocationToken::createVKey)
             .collect(toImmutableSet());
     if (!dryRun) {
       tm().delete(tokensToDelete);
     }
-    System.out.printf(
+    printStream.printf(
         "%s tokens: %s\n",
         dryRun ? "Would delete" : "Deleted",
         JOINER.join(tokensToDelete.stream().map(VKey::getKey).sorted().collect(toImmutableList())));

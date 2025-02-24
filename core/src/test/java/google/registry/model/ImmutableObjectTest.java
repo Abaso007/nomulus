@@ -29,6 +29,8 @@ import google.registry.persistence.VKey;
 import google.registry.persistence.transaction.JpaTestExtensions;
 import google.registry.persistence.transaction.JpaTestExtensions.JpaUnitTestExtension;
 import google.registry.util.CidrAddressBlock;
+import jakarta.persistence.Entity;
+import jakarta.persistence.Id;
 import java.lang.reflect.Field;
 import java.util.ArrayDeque;
 import java.util.Arrays;
@@ -37,8 +39,6 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
-import javax.persistence.Entity;
-import javax.persistence.Id;
 import org.joda.time.DateTime;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.RegisterExtension;
@@ -65,7 +65,12 @@ public class ImmutableObjectTest {
   void testToString_simpleClass() {
     SimpleObject object = new SimpleObject("foo", null);
     assertThat(object.toString())
-        .isEqualTo("" + "SimpleObject: {\n" + "    a=foo\n" + "    b=null\n" + "}");
+        .isEqualTo(
+            """
+            SimpleObject: {
+                a=foo
+                b=null
+            }""");
   }
 
   @Test

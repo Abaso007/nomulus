@@ -14,18 +14,21 @@
 
 package google.registry.model.domain.secdns;
 
-import static google.registry.model.IdService.allocateId;
+import static google.registry.persistence.transaction.TransactionManagerFactory.tm;
 
 import google.registry.model.domain.DomainHistory;
 import google.registry.model.reporting.HistoryEntry.HistoryEntryId;
-import javax.persistence.Access;
-import javax.persistence.AccessType;
-import javax.persistence.Column;
-import javax.persistence.Entity;
-import javax.persistence.Id;
+import jakarta.persistence.Access;
+import jakarta.persistence.AccessType;
+import jakarta.persistence.Column;
+import jakarta.persistence.Entity;
+import jakarta.persistence.Id;
+import jakarta.persistence.Index;
+import jakarta.persistence.Table;
 
 /** Entity class to represent a historic {@link DomainDsData}. */
 @Entity
+@Table(indexes = @Index(columnList = "domainRepoId,domainHistoryRevisionId"))
 public class DomainDsDataHistory extends DomainDsDataBase {
 
   @Id Long dsDataHistoryRevisionId;
@@ -48,7 +51,7 @@ public class DomainDsDataHistory extends DomainDsDataBase {
     instance.algorithm = dsData.getAlgorithm();
     instance.digestType = dsData.getDigestType();
     instance.digest = dsData.getDigest();
-    instance.dsDataHistoryRevisionId = allocateId();
+    instance.dsDataHistoryRevisionId = tm().reTransact(tm()::allocateId);
     return instance;
   }
 

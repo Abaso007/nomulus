@@ -17,12 +17,10 @@ package google.registry.security;
 import static com.google.common.truth.Truth.assertThat;
 import static google.registry.util.DateTimeUtils.START_OF_TIME;
 
-import com.google.appengine.api.users.User;
 import com.google.common.base.Splitter;
 import google.registry.persistence.transaction.JpaTestExtensions;
 import google.registry.persistence.transaction.JpaTestExtensions.JpaIntegrationTestExtension;
 import google.registry.testing.FakeClock;
-import google.registry.testing.FakeUserService;
 import org.joda.time.Duration;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -35,57 +33,56 @@ class XsrfTokenManagerTest {
   final JpaIntegrationTestExtension jpa =
       new JpaTestExtensions.Builder().buildIntegrationTestExtension();
 
-  private final User testUser = new User("test@example.com", "test@example.com");
+  private final String email = "test@example.com";
   private final FakeClock clock = new FakeClock(START_OF_TIME);
-  private final FakeUserService userService = new FakeUserService();
-  private final XsrfTokenManager xsrfTokenManager = new XsrfTokenManager(clock, userService);
+  private final XsrfTokenManager xsrfTokenManager = new XsrfTokenManager(clock);
 
   private String token;
 
   @BeforeEach
   void beforeEach() {
-    userService.setUser(testUser, false);
-    token = xsrfTokenManager.generateToken(testUser.getEmail());
+    token = xsrfTokenManager.generateToken(email);
   }
 
   @Test
   void testValidate_validToken() {
-    assertThat(xsrfTokenManager.validateToken(token)).isTrue();
+    assertThat(xsrfTokenManager.validateToken(email, token)).isTrue();
   }
 
   @Test
   void testValidate_tokenWithMissingParts() {
-    assertThat(xsrfTokenManager.validateToken("1:123")).isFalse();
+    assertThat(xsrfTokenManager.validateToken(email, "1:123")).isFalse();
   }
 
   @Test
   void testValidate_tokenWithBadVersion() {
-    assertThat(xsrfTokenManager.validateToken("2:123:base64")).isFalse();
+    assertThat(xsrfTokenManager.validateToken(email, "2:123:base64")).isFalse();
   }
 
   @Test
   void testValidate_tokenWithBadNumberTimestamp() {
-    assertThat(xsrfTokenManager.validateToken("1:notanumber:base64")).isFalse();
+    assertThat(xsrfTokenManager.validateToken(email, "1:notanumber:base64")).isFalse();
   }
 
   @Test
   void testValidate_tokenExpiresAfterOneDay() {
     clock.advanceBy(Duration.standardDays(1));
-    assertThat(xsrfTokenManager.validateToken(token)).isTrue();
+    assertThat(xsrfTokenManager.validateToken(email, token)).isTrue();
     clock.advanceOneMilli();
-    assertThat(xsrfTokenManager.validateToken(token)).isFalse();
+    assertThat(xsrfTokenManager.validateToken(email, token)).isFalse();
   }
 
   @Test
   void testValidate_tokenTimestampTamperedWith() {
     String encodedPart = Splitter.on(':').splitToList(token).get(2);
     long fakeTimestamp = clock.nowUtc().plusMillis(1).getMillis();
-    assertThat(xsrfTokenManager.validateToken("1:" + fakeTimestamp + ':' + encodedPart)).isFalse();
+    assertThat(xsrfTokenManager.validateToken(email, "1:" + fakeTimestamp + ':' + encodedPart))
+        .isFalse();
   }
 
   @Test
   void testValidate_tokenForDifferentUser() {
     String otherToken = xsrfTokenManager.generateToken("eve@example.com");
-    assertThat(xsrfTokenManager.validateToken(otherToken)).isFalse();
+    assertThat(xsrfTokenManager.validateToken(email, otherToken)).isFalse();
   }
 }

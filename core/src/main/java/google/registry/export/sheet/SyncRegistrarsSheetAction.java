@@ -16,14 +16,15 @@ package google.registry.export.sheet;
 
 import static com.google.common.net.MediaType.PLAIN_TEXT_UTF_8;
 import static google.registry.request.Action.Method.POST;
-import static javax.servlet.http.HttpServletResponse.SC_BAD_REQUEST;
-import static javax.servlet.http.HttpServletResponse.SC_INTERNAL_SERVER_ERROR;
-import static javax.servlet.http.HttpServletResponse.SC_NO_CONTENT;
-import static javax.servlet.http.HttpServletResponse.SC_OK;
+import static jakarta.servlet.http.HttpServletResponse.SC_BAD_REQUEST;
+import static jakarta.servlet.http.HttpServletResponse.SC_INTERNAL_SERVER_ERROR;
+import static jakarta.servlet.http.HttpServletResponse.SC_NO_CONTENT;
+import static jakarta.servlet.http.HttpServletResponse.SC_OK;
 
 import com.google.common.flogger.FluentLogger;
 import google.registry.config.RegistryConfig.Config;
 import google.registry.request.Action;
+import google.registry.request.Action.GaeService;
 import google.registry.request.Parameter;
 import google.registry.request.Response;
 import google.registry.request.auth.Auth;
@@ -54,10 +55,10 @@ import org.joda.time.Duration;
  * @see SyncRegistrarsSheet
  */
 @Action(
-    service = Action.Service.BACKEND,
+    service = GaeService.BACKEND,
     path = SyncRegistrarsSheetAction.PATH,
     method = POST,
-    auth = Auth.AUTH_API_ADMIN)
+    auth = Auth.AUTH_ADMIN)
 public class SyncRegistrarsSheetAction implements Runnable {
 
   private enum Result {
@@ -112,11 +113,11 @@ public class SyncRegistrarsSheetAction implements Runnable {
   @Override
   public void run() {
     final Optional<String> sheetId = Optional.ofNullable(idParam.orElse(idConfig.orElse(null)));
-    if (!sheetId.isPresent()) {
+    if (sheetId.isEmpty()) {
       Result.MISSINGNO.send(response, null);
       return;
     }
-    if (!idParam.isPresent()) {
+    if (idParam.isEmpty()) {
       if (!syncRegistrarsSheet.wereRegistrarsModified()) {
         Result.NOTMODIFIED.send(response, null);
         return;

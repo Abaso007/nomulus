@@ -1,0 +1,80 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: backend
+  annotations:
+    tag: "latest"
+spec:
+  selector:
+    matchLabels:
+      service: backend
+  template:
+    metadata:
+      labels:
+        service: backend
+    spec:
+      serviceAccountName: nomulus
+      nodeSelector:
+        cloud.google.com/compute-class: "Performance"
+      containers:
+      - name: backend
+        image: gcr.io/GCP_PROJECT/nomulus
+        ports:
+        - containerPort: 8080
+          name: http
+        resources:
+          requests:
+            cpu: "100m"
+            memory: "512Mi"
+        args: [ENVIRONMENT]
+        env:
+        - name: POD_ID
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.name
+        - name: JETTY_WORKER_INSTANCE
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.name
+        - name: NAMESPACE_ID
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.namespace
+        - name: CONTAINER_NAME
+          value: backend
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: backend
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: backend
+  minReplicas: 2
+  maxReplicas: 5
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 100
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: backend
+spec:
+  selector:
+    service: backend
+  ports:
+    - port: 80
+      targetPort: http
+      name: http
+---
+apiVersion: net.gke.io/v1
+kind: ServiceExport
+metadata:
+  name: backend

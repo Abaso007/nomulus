@@ -1,4 +1,4 @@
-// Copyright 2023 The Nomulus Authors. All Rights Reserved.
+// Copyright 2024 The Nomulus Authors. All Rights Reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,6 +14,12 @@
 
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 
+import { provideHttpClient } from '@angular/common/http';
+import { provideHttpClientTesting } from '@angular/common/http/testing';
+import { BrowserAnimationsModule } from '@angular/platform-browser/animations';
+import { MaterialModule } from 'src/app/material.module';
+import { RegistrarService } from 'src/app/registrar/registrar.service';
+import { BackendService } from 'src/app/shared/services/backend.service';
 import WhoisComponent from './whois.component';
 
 describe('WhoisComponent', () => {
@@ -23,6 +29,20 @@ describe('WhoisComponent', () => {
   beforeEach(async () => {
     await TestBed.configureTestingModule({
       declarations: [WhoisComponent],
+      imports: [MaterialModule, BrowserAnimationsModule],
+      providers: [
+        BackendService,
+        {
+          provide: RegistrarService,
+          useValue: {
+            registrar: function () {
+              return {};
+            },
+          },
+        },
+        provideHttpClient(),
+        provideHttpClientTesting(),
+      ],
     }).compileComponents();
 
     fixture = TestBed.createComponent(WhoisComponent);

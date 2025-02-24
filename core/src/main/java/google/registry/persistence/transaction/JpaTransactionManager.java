@@ -16,11 +16,12 @@ package google.registry.persistence.transaction;
 
 import google.registry.persistence.PersistenceModule.TransactionIsolationLevel;
 import google.registry.persistence.VKey;
-import java.util.function.Supplier;
-import javax.persistence.EntityManager;
-import javax.persistence.Query;
-import javax.persistence.TypedQuery;
-import javax.persistence.criteria.CriteriaQuery;
+import jakarta.persistence.EntityManager;
+import jakarta.persistence.Query;
+import jakarta.persistence.TypedQuery;
+import jakarta.persistence.criteria.CriteriaQuery;
+import jakarta.persistence.metamodel.Metamodel;
+import java.util.concurrent.Callable;
 
 /** Sub-interface of {@link TransactionManager} which defines JPA related methods. */
 public interface JpaTransactionManager extends TransactionManager {
@@ -32,10 +33,17 @@ public interface JpaTransactionManager extends TransactionManager {
    */
   EntityManager getStandaloneEntityManager();
 
+  /** Returns the JPA {@link Metamodel}. */
+  Metamodel getMetaModel();
+
   /**
    * Returns the {@link EntityManager} for the current request.
    *
    * <p>The returned instance is closed when the current transaction completes.
+   *
+   * <p>Note that in the current implementation the entity manager is obtained from a static {@code
+   * ThreadLocal} object that is set up by the outermost {@link #transact} call. Nested call sites
+   * have no control over which database instance to use.
    */
   EntityManager getEntityManager();
 
@@ -62,24 +70,6 @@ public interface JpaTransactionManager extends TransactionManager {
    */
   Query query(String sqlString);
 
-  /** Executes the work in a transaction with no retries and returns the result. */
-  <T> T transactNoRetry(Supplier<T> work);
-
-  /**
-   * Executes the work in a transaction at the given {@link TransactionIsolationLevel} with no
-   * retries and returns the result.
-   */
-  <T> T transactNoRetry(Supplier<T> work, TransactionIsolationLevel isolationLevel);
-
-  /** Executes the work in a transaction with no retries. */
-  void transactNoRetry(Runnable work);
-
-  /**
-   * Executes the work in a transaction at the given {@link TransactionIsolationLevel} with no
-   * retries.
-   */
-  void transactNoRetry(Runnable work, TransactionIsolationLevel isolationLevel);
-
   /** Deletes the entity by its id, throws exception if the entity is not deleted. */
   <T> void assertDelete(VKey<T> key);
 
@@ -104,6 +94,14 @@ public interface JpaTransactionManager extends TransactionManager {
   /** Return the {@link TransactionIsolationLevel} used in the current transaction. */
   TransactionIsolationLevel getCurrentTransactionIsolationLevel();
 
-  /** Asserts that the current transaction runs at the given level. */
-  void assertTransactionIsolationLevel(TransactionIsolationLevel expectedLevel);
+  /** Executes the work with the given isolation level, possibly logging all SQL statements used. */
+  <T> T transact(
+      TransactionIsolationLevel isolationLevel, Callable<T> work, boolean logSqlStatements);
+
+  /**
+   * Executes the work with the given isolation level without retry, possibly logging all SQL
+   * statements used.
+   */
+  <T> T transactNoRetry(
+      TransactionIsolationLevel isolationLevel, Callable<T> work, boolean logSqlStatements);
 }

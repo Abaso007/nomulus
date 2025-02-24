@@ -15,21 +15,22 @@
 package google.registry.flows;
 
 import google.registry.request.Action;
+import google.registry.request.Action.GaeService;
 import google.registry.request.Action.Method;
 import google.registry.request.Payload;
 import google.registry.request.auth.Auth;
+import jakarta.servlet.http.HttpSession;
 import javax.inject.Inject;
-import javax.servlet.http.HttpSession;
 
 /**
  * Establishes a transport for EPP+TLS over HTTP. All commands and responses are EPP XML according
  * to RFC 5730. Commands must be requested via POST.
  */
 @Action(
-    service = Action.Service.DEFAULT,
+    service = GaeService.DEFAULT,
     path = "/_dr/epp",
     method = Method.POST,
-    auth = Auth.AUTH_API_PUBLIC)
+    auth = Auth.AUTH_ADMIN)
 public class EppTlsAction implements Runnable {
 
   @Inject @Payload byte[] inputXmlBytes;

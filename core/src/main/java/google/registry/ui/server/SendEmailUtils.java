@@ -22,12 +22,12 @@ import com.google.common.flogger.FluentLogger;
 import google.registry.config.RegistryConfig.Config;
 import google.registry.groups.GmailClient;
 import google.registry.util.EmailMessage;
+import jakarta.mail.internet.AddressException;
+import jakarta.mail.internet.InternetAddress;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.stream.Stream;
 import javax.inject.Inject;
-import javax.mail.internet.AddressException;
-import javax.mail.internet.InternetAddress;
 
 /**
  * Utility class for sending emails from the app.
@@ -35,21 +35,14 @@ import javax.mail.internet.InternetAddress;
 public class SendEmailUtils {
 
   private static final FluentLogger logger = FluentLogger.forEnclosingClass();
-
-  private final InternetAddress gSuiteOutgoingEmailAddress;
-  private final String gSuiteOutgoingEmailDisplayName;
-  private final GmailClient gmailClient;
+  public final GmailClient gmailClient;
   private final ImmutableList<String> registrarChangesNotificationEmailAddresses;
 
   @Inject
   public SendEmailUtils(
-      @Config("gSuiteOutgoingEmailAddress") InternetAddress gSuiteOutgoingEmailAddress,
-      @Config("gSuiteOutgoingEmailDisplayName") String gSuiteOutgoingEmailDisplayName,
       @Config("registrarChangesNotificationEmailAddresses")
           ImmutableList<String> registrarChangesNotificationEmailAddresses,
       GmailClient gmailClient) {
-    this.gSuiteOutgoingEmailAddress = gSuiteOutgoingEmailAddress;
-    this.gSuiteOutgoingEmailDisplayName = gSuiteOutgoingEmailDisplayName;
     this.gmailClient = gmailClient;
     this.registrarChangesNotificationEmailAddresses = registrarChangesNotificationEmailAddresses;
   }
@@ -71,9 +64,6 @@ public class SendEmailUtils {
       Optional<String> bcc,
       ImmutableList<String> additionalAddresses) {
     try {
-      InternetAddress from =
-          new InternetAddress(
-              gSuiteOutgoingEmailAddress.getAddress(), gSuiteOutgoingEmailDisplayName);
       ImmutableList<InternetAddress> recipients =
           Stream.concat(
                   registrarChangesNotificationEmailAddresses.stream(), additionalAddresses.stream())
@@ -95,11 +85,7 @@ public class SendEmailUtils {
         return false;
       }
       EmailMessage.Builder emailMessage =
-          EmailMessage.newBuilder()
-              .setBody(body)
-              .setSubject(subject)
-              .setRecipients(recipients)
-              .setFrom(from);
+          EmailMessage.newBuilder().setBody(body).setSubject(subject).setRecipients(recipients);
       if (bcc.isPresent()) {
         try {
           InternetAddress bccInternetAddress = new InternetAddress(bcc.get(), true);

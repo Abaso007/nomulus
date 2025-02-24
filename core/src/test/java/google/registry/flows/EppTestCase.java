@@ -15,14 +15,13 @@
 package google.registry.flows;
 
 import static com.google.common.truth.Truth.assertThat;
-import static com.google.common.truth.Truth8.assertThat;
 import static google.registry.testing.DatabaseHelper.getOnlyHistoryEntryOfType;
 import static google.registry.testing.DatabaseHelper.loadAllOf;
 import static google.registry.testing.DatabaseHelper.stripBillingEventId;
 import static google.registry.testing.TestDataHelper.loadFile;
 import static google.registry.xml.XmlTestUtils.assertXmlEqualsWithMessage;
+import static jakarta.servlet.http.HttpServletResponse.SC_OK;
 import static java.nio.charset.StandardCharsets.UTF_8;
-import static javax.servlet.http.HttpServletResponse.SC_OK;
 
 import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.ImmutableSet;
@@ -43,7 +42,6 @@ import google.registry.persistence.VKey;
 import google.registry.testing.FakeClock;
 import google.registry.testing.FakeHttpSession;
 import google.registry.testing.FakeResponse;
-import google.registry.util.ProxyHttpHeaders;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
@@ -126,10 +124,6 @@ public class EppTestCase {
       setUpSession();
       FakeResponse response = executeXmlCommand(input);
 
-      // Check that the logged-in header was added to the response
-      assertThat(response.getHeaders())
-          .isEqualTo(ImmutableMap.of(ProxyHttpHeaders.LOGGED_IN, "true"));
-
       verifyAndReturnOutput(response.getPayload(), expectedOutput, inputFilename, outputFilename);
     }
 
@@ -145,10 +139,6 @@ public class EppTestCase {
       String expectedOutput = loadFile(EppTestCase.class, outputFilename, outputSubstitutions);
       setUpSession();
       FakeResponse response = executeXmlCommand(input);
-
-      // Checks that the Logged-In header is not in the response. If testing the login command, use
-      // assertLoginCommandAndResponse instead of this method.
-      assertThat(response.getHeaders()).doesNotContainEntry(ProxyHttpHeaders.LOGGED_IN, "true");
 
       return verifyAndReturnOutput(
           response.getPayload(), expectedOutput, inputFilename, outputFilename);
@@ -307,7 +297,7 @@ public class EppTestCase {
         .setReason(Reason.CREATE)
         .setTargetId(domain.getDomainName())
         .setRegistrarId(domain.getCurrentSponsorRegistrarId())
-        .setCost(Money.parse("USD 26.00"))
+        .setCost(Money.parse("USD 24.00"))
         .setPeriodYears(2)
         .setEventTime(createTime)
         .setBillingTime(createTime.plus(Tld.get(domain.getTld()).getAddGracePeriodLength()))

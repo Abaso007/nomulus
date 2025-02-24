@@ -21,7 +21,6 @@ import static google.registry.util.CollectionUtils.nullToEmpty;
 import static google.registry.util.ResourceUtils.readResourceBytes;
 import static google.registry.util.ResourceUtils.readResourceUtf8;
 
-import com.google.auto.value.AutoValue;
 import com.google.common.collect.ImmutableMap;
 import com.google.common.io.ByteSource;
 import com.google.common.io.MoreFiles;
@@ -40,14 +39,9 @@ import javax.annotation.Nullable;
 /** Contains helper methods for dealing with test data. */
 public final class TestDataHelper {
 
-  @AutoValue
-  abstract static class FileKey {
-    abstract Class<?> context();
-
-    abstract String filename();
-
+  record FileKey(Class<?> context, String filename) {
     static FileKey create(Class<?> context, String filename) {
-      return new AutoValue_TestDataHelper_FileKey(context, filename);
+      return new FileKey(context, filename);
     }
   }
 
@@ -73,13 +67,12 @@ public final class TestDataHelper {
   }
 
   /**
-   * Loads a text file from the "testdata" directory relative to the location of the specified
-   * context class.
+   * Loads a text file from a directory with a relative path to the location of the specified
+   * context class under {@code src/test/resources/}.
    */
   public static String loadFile(Class<?> context, String filename) {
     return fileCache.computeIfAbsent(
-        FileKey.create(context, filename),
-        k -> readResourceUtf8(context, filename));
+        FileKey.create(context, filename), k -> readResourceUtf8(context, filename));
   }
 
   /**
@@ -101,8 +94,7 @@ public final class TestDataHelper {
    */
   public static ByteSource loadBytes(Class<?> context, String filename) {
     return byteCache.computeIfAbsent(
-        FileKey.create(context, filename),
-        k -> readResourceBytes(context, filename));
+        FileKey.create(context, filename), k -> readResourceBytes(context, filename));
   }
 
   /**

@@ -1,0 +1,230 @@
+<app-selected-registrar-wrapper>
+  <div class="console-app-domains">
+    <h1 class="mat-headline-4" forceFocus>Domains</h1>
+
+    <div
+      class="console-app-domains__actions-wrapper"
+      [hidden]="!domainListService.activeActionComponent"
+    >
+      <ng-container
+        v-if="domainListService.activeActionComponent"
+        *ngComponentOutlet="domainListService.activeActionComponent"
+      >
+      </ng-container>
+    </div>
+
+    @if (!isLoading && totalResults == 0) {
+    <div class="console-app__empty-domains">
+      <h1>
+        <mat-icon class="console-app__empty-domains-icon secondary-text"
+          >apps_outage</mat-icon
+        >
+      </h1>
+      <h1>No domains found</h1>
+    </div>
+    } @else {
+    <mat-menu #actions="matMenu">
+      <ng-template
+        matMenuContent
+        let-domainName="domainName"
+        let-domain="domain"
+      >
+        <button
+          mat-menu-item
+          (click)="openRegistryLock(domainName)"
+          aria-label="Access registry lock for domain"
+        >
+          <mat-icon>key</mat-icon>
+          <span>Registry Lock</span>
+        </button>
+        <button
+          mat-menu-item
+          (click)="onSuspendClick(domainName)"
+          [elementId]="getElementIdForSuspendUnsuspend()"
+          [disabled]="isDomainUnsuspendable(domain)"
+        >
+          <mat-icon>lock_clock</mat-icon>
+          <span>Suspend</span>
+        </button>
+        <button
+          mat-menu-item
+          (click)="onUnsuspendClick(domainName)"
+          [elementId]="getElementIdForSuspendUnsuspend()"
+          [disabled]="!isDomainUnsuspendable(domain)"
+        >
+          <mat-icon>lock_open</mat-icon>
+          <span>Unsuspend</span>
+        </button>
+      </ng-template>
+    </mat-menu>
+    <div
+      class="console-app__domains-table-parent"
+      [hidden]="domainListService.activeActionComponent"
+    >
+      <div class="console-app__scrollable-wrapper">
+        <div class="console-app__scrollable">
+          @if (isLoading) {
+          <div class="console-app__domains-spinner">
+            <mat-spinner />
+          </div>
+          }
+          <a
+            mat-stroked-button
+            color="primary"
+            href="/console-api/dum-download?registrarId={{
+              registrarService.registrarId()
+            }}"
+            class="console-app-domains__download"
+          >
+            <mat-icon>download</mat-icon>
+            Download domains (.csv)
+          </a>
+
+          <mat-form-field class="console-app__domains-filter">
+            <mat-label>Filter</mat-label>
+            <input
+              type="search"
+              matInput
+              [(ngModel)]="searchTerm"
+              (ngModelChange)="sendInput()"
+              #input
+            />
+          </mat-form-field>
+
+          <div
+            class="console-app__domains-selection"
+            [elementId]="getElementIdForBulkDelete()"
+            [ngClass]="{ active: selection.hasValue() }"
+          >
+            <div class="console-app__domains-selection-text">
+              {{ selection.selected.length }} Selected
+            </div>
+            <div class="console-app__domains-selection-actions">
+              <button
+                mat-flat-button
+                aria-label="Delete Selected Domains"
+                [attr.aria-hidden]="!selection.hasValue()"
+                (click)="deleteSelectedDomains()"
+              >
+                Delete Selected Domains
+              </button>
+            </div>
+          </div>
+
+          <mat-table
+            [dataSource]="dataSource"
+            class="mat-elevation-z0"
+            class="console-app__domains-table"
+          >
+            <!-- Checkbox Column -->
+            <ng-container matColumnDef="select">
+              <mat-header-cell *matHeaderCellDef>
+                <mat-checkbox
+                  (change)="$event ? toggleAllRows() : null"
+                  [checked]="selection.hasValue() && isAllSelected"
+                  [indeterminate]="selection.hasValue() && !isAllSelected"
+                  [aria-label]="checkboxLabel()"
+                  [elementId]="getElementIdForBulkDelete()"
+                >
+                </mat-checkbox>
+              </mat-header-cell>
+              <mat-cell *matCellDef="let row">
+                <mat-checkbox
+                  (click)="$event.stopPropagation()"
+                  (change)="$event ? selection.toggle(row) : null"
+                  [checked]="selection.isSelected(row)"
+                  [aria-label]="checkboxLabel(row)"
+                  [elementId]="getElementIdForBulkDelete()"
+                >
+                </mat-checkbox>
+              </mat-cell>
+            </ng-container>
+
+            <ng-container matColumnDef="domainName">
+              <mat-header-cell *matHeaderCellDef>Domain Name</mat-header-cell>
+              <mat-cell *matCellDef="let element">
+                <mat-icon
+                  *ngIf="getOperationMessage(element.domainName)"
+                  [matTooltip]="getOperationMessage(element.domainName)"
+                  matTooltipPosition="above"
+                  class="primary-text"
+                  >info</mat-icon
+                >
+                <span>{{ element.domainName }}</span>
+              </mat-cell>
+            </ng-container>
+
+            <ng-container matColumnDef="creationTime">
+              <mat-header-cell *matHeaderCellDef>Creation Time</mat-header-cell>
+              <mat-cell *matCellDef="let element">
+                {{ element.creationTime.creationTime }}
+              </mat-cell>
+            </ng-container>
+
+            <ng-container matColumnDef="registrationExpirationTime">
+              <mat-header-cell *matHeaderCellDef
+                >Expiration Time</mat-header-cell
+              >
+              <mat-cell *matCellDef="let element">
+                {{ element.registrationExpirationTime }}
+              </mat-cell>
+            </ng-container>
+
+            <ng-container matColumnDef="statuses">
+              <mat-header-cell *matHeaderCellDef>Statuses</mat-header-cell>
+              <mat-cell *matCellDef="let element">
+                <span>{{ element.statuses?.join(", ") }}</span>
+              </mat-cell>
+            </ng-container>
+
+            <ng-container matColumnDef="registryLock">
+              <mat-header-cell *matHeaderCellDef
+                >Registry-Locked</mat-header-cell
+              >
+              <mat-cell *matCellDef="let element">{{
+                isDomainLocked(element.domainName)
+              }}</mat-cell>
+            </ng-container>
+
+            <ng-container matColumnDef="actions">
+              <mat-header-cell *matHeaderCellDef>Actions</mat-header-cell>
+              <mat-cell *matCellDef="let element">
+                <button
+                  mat-icon-button
+                  [matMenuTriggerFor]="actions"
+                  [matMenuTriggerData]="{
+                    domainName: element.domainName,
+                    domain: element
+                  }"
+                  aria-label="Domain actions"
+                >
+                  <mat-icon>more_horiz</mat-icon>
+                </button>
+              </mat-cell>
+            </ng-container>
+
+            <mat-header-row
+              *matHeaderRowDef="displayedColumns"
+            ></mat-header-row>
+            <mat-row *matRowDef="let row; columns: displayedColumns"></mat-row>
+
+            <!-- Row shown when there is no matching data. -->
+            <mat-row *matNoDataRow>
+              <mat-cell colspan="6">No domains found</mat-cell>
+            </mat-row>
+          </mat-table>
+          <mat-paginator
+            [length]="totalResults"
+            [pageIndex]="pageNumber"
+            [pageSize]="resultsPerPage"
+            [pageSizeOptions]="[10, 25, 50, 100, 500]"
+            (page)="onPageChange($event)"
+            aria-label="Select page of domain results"
+            showFirstLastButtons
+          ></mat-paginator>
+        </div>
+      </div>
+    </div>
+    }
+  </div>
+</app-selected-registrar-wrapper>

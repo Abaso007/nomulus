@@ -19,6 +19,9 @@ import static com.google.common.collect.Sets.union;
 import static com.google.common.io.BaseEncoding.base16;
 import static com.google.common.truth.Truth.assertThat;
 import static google.registry.model.EppResourceUtils.loadByForeignKey;
+import static google.registry.model.common.FeatureFlag.FeatureName.MINIMUM_DATASET_CONTACTS_OPTIONAL;
+import static google.registry.model.common.FeatureFlag.FeatureStatus.ACTIVE;
+import static google.registry.model.common.FeatureFlag.FeatureStatus.INACTIVE;
 import static google.registry.model.eppcommon.StatusValue.CLIENT_DELETE_PROHIBITED;
 import static google.registry.model.eppcommon.StatusValue.CLIENT_HOLD;
 import static google.registry.model.eppcommon.StatusValue.CLIENT_RENEW_PROHIBITED;
@@ -96,12 +99,15 @@ import google.registry.flows.exceptions.ResourceStatusProhibitsOperationExceptio
 import google.registry.model.ImmutableObject;
 import google.registry.model.billing.BillingBase.Reason;
 import google.registry.model.billing.BillingEvent;
+import google.registry.model.common.FeatureFlag;
 import google.registry.model.contact.Contact;
 import google.registry.model.domain.DesignatedContact;
 import google.registry.model.domain.DesignatedContact.Type;
 import google.registry.model.domain.Domain;
+import google.registry.model.domain.DomainAuthInfo;
 import google.registry.model.domain.DomainHistory;
 import google.registry.model.domain.secdns.DomainDsData;
+import google.registry.model.eppcommon.AuthInfo.PasswordAuth;
 import google.registry.model.eppcommon.Trid;
 import google.registry.model.host.Host;
 import google.registry.model.poll.PendingActionNotificationResponse.DomainPendingActionNotificationResponse;
@@ -140,6 +146,12 @@ class DomainUpdateFlowTest extends ResourceFlowTestCase<DomainUpdateFlow, Domain
     createTld("tld");
     // Note that "domain_update.xml" tests adding and removing the same contact type.
     setEppInput("domain_update.xml");
+    persistResource(
+        new FeatureFlag()
+            .asBuilder()
+            .setFeatureName(MINIMUM_DATASET_CONTACTS_OPTIONAL)
+            .setStatusMap(ImmutableSortedMap.of(START_OF_TIME, INACTIVE))
+            .build());
   }
 
   private void persistReferencedEntities() {
@@ -162,7 +174,7 @@ class DomainUpdateFlowTest extends ResourceFlowTestCase<DomainUpdateFlow, Domain
                         DesignatedContact.create(Type.TECH, mak21Contact.createVKey()),
                         DesignatedContact.create(Type.ADMIN, mak21Contact.createVKey()),
                         DesignatedContact.create(Type.BILLING, mak21Contact.createVKey())))
-                .setRegistrant(mak21Contact.createVKey())
+                .setRegistrant(Optional.of(mak21Contact.createVKey()))
                 .setNameservers(ImmutableSet.of(host.createVKey()))
                 .build());
     persistResource(
@@ -255,6 +267,38 @@ class DomainUpdateFlowTest extends ResourceFlowTestCase<DomainUpdateFlow, Domain
   }
 
   @Test
+  void testSuccess_noExistingAuthData() throws Exception {
+    setEppInput("domain_update_no_auth_change.xml");
+    persistReferencedEntities();
+    persistDomain();
+    persistResource(
+        reloadResourceByForeignKey()
+            .asBuilder()
+            .setAuthInfo(DomainAuthInfo.create(PasswordAuth.create(null)))
+            .build());
+    assertMutatingFlow(true);
+    runFlowAssertResponse(loadFile("generic_success_response.xml"));
+    Domain domain = reloadResourceByForeignKey();
+    // Check that the domain was updated. These values came from the xml.
+    assertAboutDomains()
+        .that(domain)
+        .hasStatusValue(CLIENT_HOLD)
+        .and()
+        .hasAuthInfoPwd(null)
+        .and()
+        .hasOneHistoryEntryEachOfTypes(DOMAIN_CREATE, DOMAIN_UPDATE)
+        .and()
+        .hasLastEppUpdateTime(clock.nowUtc())
+        .and()
+        .hasLastEppUpdateRegistrarId("TheRegistrar")
+        .and()
+        .hasNoAutorenewEndTime();
+    assertNoBillingEvents();
+    assertDomainDnsRequests("example.tld");
+    assertLastHistoryContainsResource(reloadResourceByForeignKey());
+  }
+
+  @Test
   void testSuccess_cachingDisabled() throws Exception {
     boolean origIsCachingEnabled = RegistryConfig.isEppResourceCachingEnabled();
     try {
@@ -287,6 +331,21 @@ class DomainUpdateFlowTest extends ResourceFlowTestCase<DomainUpdateFlow, Domain
     MissingRegistrantException thrown =
         assertThrows(MissingRegistrantException.class, this::runFlow);
     assertAboutEppExceptions().that(thrown).marshalsToXml();
+  }
+
+  @Test
+  void testSuccess_minimumDatasetPhase1_emptyRegistrant() throws Exception {
+    persistResource(
+        FeatureFlag.get(MINIMUM_DATASET_CONTACTS_OPTIONAL)
+            .asBuilder()
+            .setStatusMap(
+                ImmutableSortedMap.of(START_OF_TIME, INACTIVE, clock.nowUtc().minusDays(5), ACTIVE))
+            .build());
+    setEppInput("domain_update_empty_registrant.xml");
+    persistReferencedEntities();
+    persistDomain();
+    runFlowAssertResponse(loadFile("generic_success_response.xml"));
+    assertThat(reloadResourceByForeignKey().getRegistrant()).isEmpty();
   }
 
   private void modifyDomainToHave13Nameservers() throws Exception {
@@ -338,7 +397,7 @@ class DomainUpdateFlowTest extends ResourceFlowTestCase<DomainUpdateFlow, Domain
             .asBuilder()
             .setNameservers(nameservers.build())
             .setContacts(ImmutableSet.copyOf(contacts.subList(0, 3)))
-            .setRegistrant(contacts.get(3).getContactKey())
+            .setRegistrant(Optional.of(contacts.get(3).getContactKey()))
             .build());
     clock.advanceOneMilli();
     assertMutatingFlow(true);
@@ -348,7 +407,7 @@ class DomainUpdateFlowTest extends ResourceFlowTestCase<DomainUpdateFlow, Domain
     assertThat(domain.getNameservers()).hasSize(13);
     // getContacts does not return contacts of type REGISTRANT, so check these separately.
     assertThat(domain.getContacts()).hasSize(3);
-    assertThat(loadByKey(domain.getRegistrant()).getContactId()).isEqualTo("max_test_7");
+    assertThat(loadByKey(domain.getRegistrant().get()).getContactId()).isEqualTo("max_test_7");
     assertNoBillingEvents();
     assertDomainDnsRequests("example.tld");
   }
@@ -426,7 +485,7 @@ class DomainUpdateFlowTest extends ResourceFlowTestCase<DomainUpdateFlow, Domain
     persistResource(
         DatabaseHelper.newDomain(getUniqueIdFromCommand())
             .asBuilder()
-            .setRegistrant(sh8013.createVKey())
+            .setRegistrant(Optional.of(sh8013.createVKey()))
             .build());
     clock.advanceOneMilli();
     runFlowAssertResponse(loadFile("generic_success_response.xml"));
@@ -441,7 +500,7 @@ class DomainUpdateFlowTest extends ResourceFlowTestCase<DomainUpdateFlow, Domain
     persistResource(
         DatabaseHelper.newDomain(getUniqueIdFromCommand())
             .asBuilder()
-            .setRegistrant(sh8013Key)
+            .setRegistrant(Optional.of(sh8013Key))
             .setContacts(
                 ImmutableSet.of(
                     DesignatedContact.create(Type.ADMIN, sh8013Key),
@@ -1479,6 +1538,27 @@ class DomainUpdateFlowTest extends ResourceFlowTestCase<DomainUpdateFlow, Domain
   }
 
   @Test
+  void testSuccess_minimumDatasetPhase1_removeAdmin() throws Exception {
+    persistResource(
+        FeatureFlag.get(MINIMUM_DATASET_CONTACTS_OPTIONAL)
+            .asBuilder()
+            .setStatusMap(
+                ImmutableSortedMap.of(START_OF_TIME, INACTIVE, clock.nowUtc().minusDays(5), ACTIVE))
+            .build());
+    setEppInput("domain_update_remove_admin.xml");
+    persistReferencedEntities();
+    persistResource(
+        DatabaseHelper.newDomain(getUniqueIdFromCommand())
+            .asBuilder()
+            .setContacts(
+                ImmutableSet.of(
+                    DesignatedContact.create(Type.ADMIN, sh8013Contact.createVKey()),
+                    DesignatedContact.create(Type.TECH, sh8013Contact.createVKey())))
+            .build());
+    runFlowAssertResponse(loadFile("generic_success_response.xml"));
+  }
+
+  @Test
   void testFailure_removeTech() throws Exception {
     setEppInput("domain_update_remove_tech.xml");
     persistReferencedEntities();
@@ -1492,6 +1572,27 @@ class DomainUpdateFlowTest extends ResourceFlowTestCase<DomainUpdateFlow, Domain
             .build());
     EppException thrown = assertThrows(MissingTechnicalContactException.class, this::runFlow);
     assertAboutEppExceptions().that(thrown).marshalsToXml();
+  }
+
+  @Test
+  void testSuccess_minimumDatasetPhase1_removeTech() throws Exception {
+    persistResource(
+        FeatureFlag.get(MINIMUM_DATASET_CONTACTS_OPTIONAL)
+            .asBuilder()
+            .setStatusMap(
+                ImmutableSortedMap.of(START_OF_TIME, INACTIVE, clock.nowUtc().minusDays(5), ACTIVE))
+            .build());
+    setEppInput("domain_update_remove_tech.xml");
+    persistReferencedEntities();
+    persistResource(
+        DatabaseHelper.newDomain(getUniqueIdFromCommand())
+            .asBuilder()
+            .setContacts(
+                ImmutableSet.of(
+                    DesignatedContact.create(Type.ADMIN, sh8013Contact.createVKey()),
+                    DesignatedContact.create(Type.TECH, sh8013Contact.createVKey())))
+            .build());
+    runFlowAssertResponse(loadFile("generic_success_response.xml"));
   }
 
   @Test
@@ -1590,7 +1691,7 @@ class DomainUpdateFlowTest extends ResourceFlowTestCase<DomainUpdateFlow, Domain
             .setAllowedFullyQualifiedHostNames(ImmutableSet.of("ns1.example.foo"))
             .build());
     runFlow();
-    assertThat(loadByKey(reloadResourceByForeignKey().getRegistrant()).getContactId())
+    assertThat(loadByKey(reloadResourceByForeignKey().getRegistrant().get()).getContactId())
         .isEqualTo("sh8013");
   }
 
@@ -1605,7 +1706,7 @@ class DomainUpdateFlowTest extends ResourceFlowTestCase<DomainUpdateFlow, Domain
         .forEach(
             contact ->
                 assertThat(loadByKey(contact.getContactKey()).getContactId()).isEqualTo("mak21"));
-    assertThat(loadByKey(reloadResourceByForeignKey().getRegistrant()).getContactId())
+    assertThat(loadByKey(reloadResourceByForeignKey().getRegistrant().get()).getContactId())
         .isEqualTo("mak21");
 
     runFlow();
@@ -1615,7 +1716,7 @@ class DomainUpdateFlowTest extends ResourceFlowTestCase<DomainUpdateFlow, Domain
         .forEach(
             contact ->
                 assertThat(loadByKey(contact.getContactKey()).getContactId()).isEqualTo("sh8013"));
-    assertThat(loadByKey(reloadResourceByForeignKey().getRegistrant()).getContactId())
+    assertThat(loadByKey(reloadResourceByForeignKey().getRegistrant().get()).getContactId())
         .isEqualTo("sh8013");
   }
 

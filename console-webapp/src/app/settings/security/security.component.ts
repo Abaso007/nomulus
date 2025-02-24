@@ -1,4 +1,4 @@
-// Copyright 2023 The Nomulus Authors. All Rights Reserved.
+// Copyright 2024 The Nomulus Authors. All Rights Reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,80 +12,40 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import { Component } from '@angular/core';
-import { SecurityService, SecuritySettings } from './security.service';
-import { HttpErrorResponse } from '@angular/common/http';
-import { MatSnackBar } from '@angular/material/snack-bar';
+import { Component, effect } from '@angular/core';
+import {
+  RegistrarService,
+  SecuritySettings,
+} from 'src/app/registrar/registrar.service';
+import { SecurityService, apiToUiConverter } from './security.service';
 
 @Component({
   selector: 'app-security',
   templateUrl: './security.component.html',
   styleUrls: ['./security.component.scss'],
-  providers: [SecurityService],
+  standalone: false,
 })
 export default class SecurityComponent {
-  loading: boolean = false;
-  inEdit: boolean = false;
+  public static PATH = 'security';
   dataSource: SecuritySettings = {};
-
   constructor(
     public securityService: SecurityService,
-    private _snackBar: MatSnackBar
+    public registrarService: RegistrarService
   ) {
-    this.loading = true;
-    this.securityService.fetchSecurityDetails().subscribe({
-      complete: () => {
-        this.dataSource = this.securityService.securitySettings;
-        this.loading = false;
-      },
-      error: (err: HttpErrorResponse) => {
-        this._snackBar.open(err.error, undefined, {
-          duration: 1500,
-        });
-        this.loading = false;
-      },
+    effect(() => {
+      if (this.registrarService.registrar()) {
+        this.dataSource = apiToUiConverter(this.registrarService.registrar());
+        this.securityService.isEditingSecurity = false;
+        this.securityService.isEditingPassword = false;
+      }
     });
   }
 
-  enableEdit() {
-    this.inEdit = true;
-    this.dataSource = JSON.parse(
-      JSON.stringify(this.securityService.securitySettings)
-    );
+  editSecurity() {
+    this.securityService.isEditingSecurity = true;
   }
 
-  disableEdit() {
-    this.inEdit = false;
-    this.dataSource = this.securityService.securitySettings;
-  }
-
-  createIpEntry() {
-    this.dataSource.ipAddressAllowList?.push({ value: '' });
-  }
-
-  save() {
-    this.loading = true;
-    this.securityService.saveChanges(this.dataSource).subscribe({
-      complete: () => {
-        this.loading = false;
-        this.dataSource = this.securityService.securitySettings;
-      },
-      error: (err: HttpErrorResponse) => {
-        this._snackBar.open(err.error, undefined, {
-          duration: 1500,
-        });
-      },
-    });
-    this.disableEdit();
-  }
-
-  cancel() {
-    this.dataSource = this.securityService.securitySettings;
-    this.inEdit = false;
-  }
-
-  removeIpEntry(index: number) {
-    this.dataSource.ipAddressAllowList =
-      this.dataSource.ipAddressAllowList?.filter((_, i) => i != index);
+  editEppPassword() {
+    this.securityService.isEditingPassword = true;
   }
 }

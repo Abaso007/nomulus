@@ -15,7 +15,10 @@
 package google.registry.request;
 
 import com.google.common.net.MediaType;
-import javax.servlet.http.HttpServletResponse;
+import jakarta.servlet.http.Cookie;
+import jakarta.servlet.http.HttpServletResponse;
+import java.io.IOException;
+import java.io.PrintWriter;
 import org.joda.time.DateTime;
 
 /**
@@ -24,6 +27,8 @@ import org.joda.time.DateTime;
  * @see ResponseImpl
  */
 public interface Response {
+
+  void sendRedirect(String url) throws IOException;
 
   /** Sets the HTTP status code. */
   void setStatus(int status);
@@ -51,4 +56,13 @@ public interface Response {
    * @see HttpServletResponse#setDateHeader(String, long)
    */
   void setDateHeader(String header, DateTime timestamp);
+
+  /**
+   * Adds a cookie to the response
+   *
+   * @see HttpServletResponse#addCookie(Cookie)
+   */
+  void addCookie(Cookie cookie);
+
+  PrintWriter getWriter() throws IOException;
 }

@@ -61,14 +61,7 @@ abstract class EppToolCommand extends ConfirmingCommand implements CommandWithCo
 
   private ServiceConnection connection;
 
-  static class XmlEppParameters {
-    final String clientId;
-    final String xml;
-
-    XmlEppParameters(String clientId, String xml) {
-      this.clientId = clientId;
-      this.xml = xml;
-    }
+  record XmlEppParameters(String clientId, String xml) {
 
     @Override
     public String toString() {
@@ -143,7 +136,7 @@ abstract class EppToolCommand extends ConfirmingCommand implements CommandWithCo
       params.put("dryRun", dryRun);
       params.put("clientId", command.clientId);
       params.put("superuser", superuser);
-      params.put("xml", URLEncoder.encode(command.xml, UTF_8.toString()));
+      params.put("xml", URLEncoder.encode(command.xml, UTF_8));
       String requestBody =
           Joiner.on('&').withKeyValueSeparator("=").join(filterValues(params, Objects::nonNull));
       responses.add(

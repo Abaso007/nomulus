@@ -17,7 +17,6 @@ package google.registry.flows.domain;
 import static com.google.common.collect.ImmutableSet.toImmutableSet;
 import static com.google.common.collect.MoreCollectors.onlyElement;
 import static com.google.common.truth.Truth.assertThat;
-import static com.google.common.truth.Truth8.assertThat;
 import static google.registry.batch.AsyncTaskEnqueuer.PARAM_REQUESTED_TIME;
 import static google.registry.batch.AsyncTaskEnqueuer.PARAM_RESOURCE_KEY;
 import static google.registry.batch.AsyncTaskEnqueuer.QUEUE_ASYNC_ACTIONS;
@@ -115,7 +114,7 @@ import google.registry.model.eppcommon.Trid;
 import google.registry.model.poll.PendingActionNotificationResponse;
 import google.registry.model.poll.PollMessage;
 import google.registry.model.registrar.Registrar;
-import google.registry.model.registrar.Registrar.State;
+import google.registry.model.registrar.RegistrarBase.State;
 import google.registry.model.reporting.DomainTransactionRecord;
 import google.registry.model.reporting.HistoryEntry;
 import google.registry.model.reporting.HistoryEntry.HistoryEntryId;
@@ -251,11 +250,6 @@ class DomainTransferRequestFlowTest
                 .build());
   }
 
-  /** Implements the missing Optional.stream function that is added in Java 9. */
-  private static <T> Stream<T> optionalToStream(Optional<T> optional) {
-    return optional.map(Stream::of).orElseGet(Stream::empty);
-  }
-
   private void assertHistoryEntriesContainBillingEventsAndGracePeriods(
       DateTime expectedExpirationTime,
       DateTime implicitTransferTime,
@@ -314,7 +308,7 @@ class DomainTransferRequestFlowTest
     ImmutableSet<BillingBase> expectedBillingBases =
         Streams.concat(
                 Stream.of(losingClientAutorenew, gainingClientAutorenew),
-                optionalToStream(optionalTransferBillingEvent))
+                optionalTransferBillingEvent.stream())
             .collect(toImmutableSet());
     assertBillingEvents(Sets.union(expectedBillingBases, extraBillingBases));
     // Assert that the domain's TransferData server-approve billing events match the above.
@@ -331,8 +325,7 @@ class DomainTransferRequestFlowTest
     // Assert that the full set of server-approve billing events is exactly the extra ones plus
     // the transfer billing event (if present) and the gaining client autorenew.
     ImmutableSet<BillingBase> expectedServeApproveBillingBases =
-        Streams.concat(
-                Stream.of(gainingClientAutorenew), optionalToStream(optionalTransferBillingEvent))
+        Streams.concat(Stream.of(gainingClientAutorenew), optionalTransferBillingEvent.stream())
             .collect(toImmutableSet());
     assertBillingEventsEqual(
         Iterables.filter(
@@ -1077,7 +1070,8 @@ class DomainTransferRequestFlowTest
         Tld.get("tld")
             .asBuilder()
             .setCurrency(JPY)
-            .setCreateBillingCost(Money.ofMajor(JPY, 800))
+            .setCreateBillingCostTransitions(
+                ImmutableSortedMap.of(START_OF_TIME, Money.ofMajor(JPY, 800)))
             .setEapFeeSchedule(ImmutableSortedMap.of(START_OF_TIME, Money.ofMajor(JPY, 800)))
             .setRenewBillingCostTransitions(
                 ImmutableSortedMap.of(START_OF_TIME, Money.ofMajor(JPY, 800)))
@@ -1345,7 +1339,9 @@ class DomainTransferRequestFlowTest
             new AllocationToken.Builder()
                 .setToken("abc123")
                 .setTokenType(BULK_PRICING)
+                .setDiscountFraction(1.0)
                 .setRenewalPriceBehavior(RenewalPriceBehavior.SPECIFIED)
+                .setRenewalPrice(Money.of(USD, 0))
                 .setAllowedEppActions(ImmutableSet.of(CommandName.CREATE))
                 .setAllowedRegistrarIds(ImmutableSet.of("TheRegistrar"))
                 .build());
@@ -1404,7 +1400,9 @@ class DomainTransferRequestFlowTest
             new AllocationToken.Builder()
                 .setToken("abc123")
                 .setTokenType(BULK_PRICING)
+                .setDiscountFraction(1.0)
                 .setRenewalPriceBehavior(RenewalPriceBehavior.SPECIFIED)
+                .setRenewalPrice(Money.of(USD, 0))
                 .setAllowedEppActions(ImmutableSet.of(CommandName.CREATE))
                 .setAllowedRegistrarIds(ImmutableSet.of("TheRegistrar"))
                 .build());
@@ -1462,7 +1460,9 @@ class DomainTransferRequestFlowTest
             new AllocationToken.Builder()
                 .setToken("abc123")
                 .setTokenType(BULK_PRICING)
+                .setDiscountFraction(1.0)
                 .setRenewalPriceBehavior(RenewalPriceBehavior.SPECIFIED)
+                .setRenewalPrice(Money.of(USD, 0))
                 .setAllowedEppActions(ImmutableSet.of(CommandName.CREATE))
                 .setAllowedRegistrarIds(ImmutableSet.of("TheRegistrar"))
                 .build());

@@ -28,22 +28,22 @@ import google.registry.config.RegistryConfig.Config;
 import google.registry.util.EmailMessage;
 import google.registry.util.EmailMessage.Attachment;
 import google.registry.util.Retrier;
+import jakarta.mail.Address;
+import jakarta.mail.BodyPart;
+import jakarta.mail.Message.RecipientType;
+import jakarta.mail.MessagingException;
+import jakarta.mail.Multipart;
+import jakarta.mail.Session;
+import jakarta.mail.internet.InternetAddress;
+import jakarta.mail.internet.MimeBodyPart;
+import jakarta.mail.internet.MimeMessage;
+import jakarta.mail.internet.MimeMultipart;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.UnsupportedEncodingException;
 import java.util.Properties;
 import java.util.function.Predicate;
 import javax.inject.Inject;
-import javax.mail.Address;
-import javax.mail.BodyPart;
-import javax.mail.Message.RecipientType;
-import javax.mail.MessagingException;
-import javax.mail.Multipart;
-import javax.mail.Session;
-import javax.mail.internet.InternetAddress;
-import javax.mail.internet.MimeBodyPart;
-import javax.mail.internet.MimeMessage;
-import javax.mail.internet.MimeMultipart;
 
 /** Sends {@link EmailMessage EmailMessages} through Google Workspace using {@link Gmail}. */
 public final class GmailClient {
@@ -79,9 +79,6 @@ public final class GmailClient {
 
   /**
    * Sends {@code emailMessage} using {@link Gmail}.
-   *
-   * <p>If the sender as specified by {@link EmailMessage#from} differs from the caller's identity,
-   * the caller must have delegated `send` authority to the sender.
    */
   public void sendEmail(EmailMessage emailMessage) {
     if (!isEmailSendingEnabled) {
@@ -138,6 +135,7 @@ public final class GmailClient {
         BodyPart attachmentPart = new MimeBodyPart();
         attachmentPart.setContent(attachment.content(), attachment.contentType().toString());
         attachmentPart.setFileName(attachment.filename());
+        attachmentPart.setDisposition(MimeBodyPart.ATTACHMENT);
         multipart.addBodyPart(attachmentPart);
       }
       msg.addRecipients(RecipientType.BCC, toArray(emailMessage.bccs(), Address.class));

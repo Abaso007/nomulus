@@ -15,7 +15,6 @@
 package google.registry.tools;
 
 import static com.google.common.truth.Truth.assertThat;
-import static com.google.common.truth.Truth8.assertThat;
 import static google.registry.testing.CertificateSamples.SAMPLE_CERT;
 import static google.registry.testing.CertificateSamples.SAMPLE_CERT3;
 import static google.registry.testing.CertificateSamples.SAMPLE_CERT3_HASH;
@@ -68,6 +67,7 @@ class CreateRegistrarCommandTest extends CommandTestCase<CreateRegistrarCommand>
             2048,
             ImmutableSet.of("secp256r1", "secp384r1"),
             fakeClock);
+    command.printStream = System.out;
   }
 
   @Test
@@ -115,15 +115,15 @@ class CreateRegistrarCommandTest extends CommandTestCase<CreateRegistrarCommand>
   }
 
   @Test
-  void testSuccess_quotedPassword() throws Exception {
+  void testSuccess_password() throws Exception {
     runCommandForced(
         "--name=blobio",
-        "--password=\"some_password\"",
+        "--password=some_password",
         "--registrar_type=REAL",
         "--iana_id=8",
         "--passcode=01234",
         "--icann_referral_email=foo@bar.test",
-        "--street=\"123 Fake St\"",
+        "--street=123 Fake St",
         "--city Fakington",
         "--state MA",
         "--zip 00351",
@@ -593,7 +593,8 @@ class CreateRegistrarCommandTest extends CommandTestCase<CreateRegistrarCommand>
         newTld("foo", "FOO")
             .asBuilder()
             .setCurrency(JPY)
-            .setCreateBillingCost(Money.of(JPY, new BigDecimal(1300)))
+            .setCreateBillingCostTransitions(
+                ImmutableSortedMap.of(START_OF_TIME, Money.of(JPY, new BigDecimal(1300))))
             .setRestoreBillingCost(Money.of(JPY, new BigDecimal(1700)))
             .setServerStatusChangeBillingCost(Money.of(JPY, new BigDecimal(1900)))
             .setRegistryLockOrUnlockBillingCost(Money.of(JPY, new BigDecimal(2700)))
@@ -630,9 +631,9 @@ class CreateRegistrarCommandTest extends CommandTestCase<CreateRegistrarCommand>
         "--password=some_password",
         "--registrar_type=REAL",
         "--iana_id=8",
-        "--street=\"1234 Main St\"",
-        "--street \"4th Floor\"",
-        "--street \"Suite 1\"",
+        "--street=1234 Main St",
+        "--street 4th Floor",
+        "--street Suite 1",
         "--city Brooklyn",
         "--state NY",
         "--zip 11223",
@@ -1154,7 +1155,7 @@ class CreateRegistrarCommandTest extends CommandTestCase<CreateRegistrarCommand>
             () ->
                 runCommandForced(
                     "--name=blobio",
-                    "--password=\"\"",
+                    "--password=",
                     "--registrar_type=REAL",
                     "--iana_id=8",
                     "--passcode=01234",
@@ -1379,7 +1380,7 @@ class CreateRegistrarCommandTest extends CommandTestCase<CreateRegistrarCommand>
   @Test
   void testFailure_tooFewStreetLines() {
     assertThrows(
-        IllegalArgumentException.class,
+        ParameterException.class,
         () ->
             runCommandForced(
                 "--name=blobio",
@@ -1579,7 +1580,7 @@ class CreateRegistrarCommandTest extends CommandTestCase<CreateRegistrarCommand>
   @Test
   void testFailure_unknownFlag() {
     assertThrows(
-        ParameterException.class,
+        IllegalArgumentException.class,
         () ->
             runCommandForced(
                 "--name=blobio",

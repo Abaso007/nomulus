@@ -16,8 +16,8 @@ package google.registry.reporting.spec11;
 
 import static google.registry.beam.BeamUtils.createJobName;
 import static google.registry.request.Action.Method.POST;
-import static javax.servlet.http.HttpServletResponse.SC_INTERNAL_SERVER_ERROR;
-import static javax.servlet.http.HttpServletResponse.SC_OK;
+import static jakarta.servlet.http.HttpServletResponse.SC_INTERNAL_SERVER_ERROR;
+import static jakarta.servlet.http.HttpServletResponse.SC_OK;
 
 import com.google.api.services.dataflow.Dataflow;
 import com.google.api.services.dataflow.model.LaunchFlexTemplateParameter;
@@ -29,15 +29,15 @@ import com.google.common.flogger.FluentLogger;
 import com.google.common.net.MediaType;
 import google.registry.batch.CloudTasksUtils;
 import google.registry.config.RegistryConfig.Config;
-import google.registry.config.RegistryEnvironment;
 import google.registry.keyring.api.KeyModule.Key;
 import google.registry.reporting.ReportingModule;
 import google.registry.request.Action;
-import google.registry.request.Action.Service;
+import google.registry.request.Action.GaeService;
 import google.registry.request.Parameter;
 import google.registry.request.Response;
 import google.registry.request.auth.Auth;
 import google.registry.util.Clock;
+import google.registry.util.RegistryEnvironment;
 import java.io.IOException;
 import javax.inject.Inject;
 import org.joda.time.Duration;
@@ -50,10 +50,10 @@ import org.joda.time.LocalDate;
  * generates the specified month's Spec11 report and stores it on GCS.
  */
 @Action(
-    service = Action.Service.BACKEND,
+    service = GaeService.BACKEND,
     path = GenerateSpec11ReportAction.PATH,
     method = POST,
-    auth = Auth.AUTH_API_ADMIN)
+    auth = Auth.AUTH_ADMIN)
 public class GenerateSpec11ReportAction implements Runnable {
 
   private static final FluentLogger logger = FluentLogger.forEnclosingClass();
@@ -133,9 +133,9 @@ public class GenerateSpec11ReportAction implements Runnable {
       if (sendEmail) {
         cloudTasksUtils.enqueue(
             ReportingModule.BEAM_QUEUE,
-            cloudTasksUtils.createPostTaskWithDelay(
-                PublishSpec11ReportAction.PATH,
-                Service.BACKEND,
+            cloudTasksUtils.createTaskWithDelay(
+                PublishSpec11ReportAction.class,
+                POST,
                 ImmutableMultimap.of(
                     ReportingModule.PARAM_JOB_ID,
                     jobId,

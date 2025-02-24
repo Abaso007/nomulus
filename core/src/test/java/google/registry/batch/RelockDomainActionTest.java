@@ -28,8 +28,8 @@ import static google.registry.testing.SqlHelper.getMostRecentVerifiedRegistryLoc
 import static google.registry.testing.SqlHelper.getRegistryLockByVerificationCode;
 import static google.registry.testing.SqlHelper.saveRegistryLock;
 import static google.registry.tools.LockOrUnlockDomainCommand.REGISTRY_LOCK_STATUSES;
-import static javax.servlet.http.HttpServletResponse.SC_NO_CONTENT;
-import static javax.servlet.http.HttpServletResponse.SC_OK;
+import static jakarta.servlet.http.HttpServletResponse.SC_NO_CONTENT;
+import static jakarta.servlet.http.HttpServletResponse.SC_OK;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoMoreInteractions;
 
@@ -50,8 +50,8 @@ import google.registry.testing.FakeResponse;
 import google.registry.tools.DomainLockUtils;
 import google.registry.util.EmailMessage;
 import google.registry.util.StringGenerator.Alphabets;
+import jakarta.mail.internet.InternetAddress;
 import java.util.Optional;
-import javax.mail.internet.InternetAddress;
 import org.joda.time.DateTime;
 import org.joda.time.Duration;
 import org.junit.jupiter.api.AfterEach;
@@ -254,11 +254,12 @@ public class RelockDomainActionTest {
         EmailMessage.newBuilder()
             .setSubject("Successful re-lock of domain example.tld")
             .setBody(
-                "The domain example.tld was successfully re-locked.\n\nPlease "
-                    + "contact support at support@example.com if you have any questions.")
+                """
+                    The domain example.tld was successfully re-locked.
+
+                    Please contact support at support@example.com if you have any questions.""")
             .setRecipients(
                 ImmutableSet.of(new InternetAddress("Marla.Singer.RegistryLock@crr.com")))
-            .setFrom(new InternetAddress("outgoing@example.com"))
             .build();
     verify(gmailClient).sendEmail(expectedEmail);
   }
@@ -266,8 +267,10 @@ public class RelockDomainActionTest {
   private void assertNonTransientFailureEmail(String exceptionMessage) throws Exception {
     String expectedBody =
         String.format(
-            "There was an error when automatically re-locking example.tld. Error message: %s\n\n"
-                + "Please contact support at support@example.com if you have any questions.",
+            """
+                There was an error when automatically re-locking example.tld. Error message: %s
+
+                Please contact support at support@example.com if you have any questions.""",
             exceptionMessage);
     assertFailureEmailWithBody(
         expectedBody, ImmutableSet.of(new InternetAddress("Marla.Singer.RegistryLock@crr.com")));
@@ -292,7 +295,6 @@ public class RelockDomainActionTest {
             .setSubject("Error re-locking domain example.tld")
             .setBody(body)
             .setRecipients(recipients)
-            .setFrom(new InternetAddress("outgoing@example.com"))
             .build();
     verify(gmailClient).sendEmail(expectedEmail);
   }
@@ -321,12 +323,10 @@ public class RelockDomainActionTest {
   private RelockDomainAction createAction(Long oldUnlockRevisionId, int previousAttempts)
       throws Exception {
     InternetAddress alertRecipientAddress = new InternetAddress("alerts@example.com");
-    InternetAddress gSuiteOutgoingAddress = new InternetAddress("outgoing@example.com");
     return new RelockDomainAction(
         oldUnlockRevisionId,
         previousAttempts,
         alertRecipientAddress,
-        gSuiteOutgoingAddress,
         "support@example.com",
         gmailClient,
         domainLockUtils,

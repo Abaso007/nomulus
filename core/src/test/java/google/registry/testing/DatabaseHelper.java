@@ -28,7 +28,6 @@ import static google.registry.config.RegistryConfig.getContactAndHostRoidSuffix;
 import static google.registry.config.RegistryConfig.getContactAutomaticTransferLength;
 import static google.registry.model.EppResourceUtils.createDomainRepoId;
 import static google.registry.model.EppResourceUtils.createRepoId;
-import static google.registry.model.IdService.allocateId;
 import static google.registry.model.ImmutableObjectSubject.assertAboutImmutableObjects;
 import static google.registry.model.ImmutableObjectSubject.immutableObjectCorrespondence;
 import static google.registry.model.ResourceTransferUtils.createTransferResponse;
@@ -72,6 +71,9 @@ import google.registry.model.billing.BillingCancellation;
 import google.registry.model.billing.BillingEvent;
 import google.registry.model.billing.BillingRecurrence;
 import google.registry.model.common.DnsRefreshRequest;
+import google.registry.model.console.GlobalRole;
+import google.registry.model.console.User;
+import google.registry.model.console.UserRoles;
 import google.registry.model.contact.Contact;
 import google.registry.model.contact.ContactAuthInfo;
 import google.registry.model.contact.ContactHistory;
@@ -91,8 +93,9 @@ import google.registry.model.host.Host;
 import google.registry.model.poll.PollMessage;
 import google.registry.model.pricing.StaticPremiumListPricingEngine;
 import google.registry.model.registrar.Registrar;
-import google.registry.model.registrar.Registrar.State;
 import google.registry.model.registrar.RegistrarAddress;
+import google.registry.model.registrar.RegistrarBase;
+import google.registry.model.registrar.RegistrarBase.State;
 import google.registry.model.reporting.HistoryEntry;
 import google.registry.model.reporting.HistoryEntryDao;
 import google.registry.model.tld.Tld;
@@ -121,6 +124,7 @@ import org.joda.money.CurrencyUnit;
 import org.joda.money.Money;
 import org.joda.time.DateTime;
 import org.joda.time.DateTimeZone;
+import org.joda.time.Duration;
 
 /** Static utils for setting up test resources. */
 public final class DatabaseHelper {
@@ -186,7 +190,7 @@ public final class DatabaseHelper {
         .setPersistedCurrentSponsorRegistrarId("TheRegistrar")
         .setCreationTimeForTest(START_OF_TIME)
         .setAuthInfo(DomainAuthInfo.create(PasswordAuth.create("2fooBAR")))
-        .setRegistrant(contactKey)
+        .setRegistrant(Optional.of(contactKey))
         .setContacts(
             ImmutableSet.of(
                 DesignatedContact.create(Type.ADMIN, contactKey),
@@ -243,7 +247,7 @@ public final class DatabaseHelper {
         // Set billing costs to distinct small primes to avoid masking bugs in tests.
         .setRenewBillingCostTransitions(ImmutableSortedMap.of(START_OF_TIME, Money.of(USD, 11)))
         .setEapFeeSchedule(ImmutableSortedMap.of(START_OF_TIME, Money.zero(USD)))
-        .setCreateBillingCost(Money.of(USD, 13))
+        .setCreateBillingCostTransitions(ImmutableSortedMap.of(START_OF_TIME, Money.of(USD, 13)))
         .setRestoreBillingCost(Money.of(USD, 17))
         .setServerStatusChangeBillingCost(Money.of(USD, 19))
         // Always set a default premium list. Tests that don't want it can delete it.
@@ -345,23 +349,17 @@ public final class DatabaseHelper {
         domain.asBuilder().setAutorenewBillingEvent(billingRecurrence.createVKey()).build());
   }
 
-  public static ReservedList persistReservedList(String listName, String... lines) {
-    return persistReservedList(listName, true, lines);
-  }
-
   public static ReservedList persistReservedList(ReservedList reservedList) {
     ReservedListDao.save(reservedList);
     maybeAdvanceClock();
     return reservedList;
   }
 
-  public static ReservedList persistReservedList(
-      String listName, boolean shouldPublish, String... lines) {
+  public static ReservedList persistReservedList(String listName, String... lines) {
     ReservedList reservedList =
         new ReservedList.Builder()
             .setName(listName)
             .setReservedListMapFromLines(ImmutableList.copyOf(lines))
-            .setShouldPublish(shouldPublish)
             .setCreationTimestamp(DateTime.now(DateTimeZone.UTC))
             .build();
     return persistReservedList(reservedList);
@@ -394,7 +392,7 @@ public final class DatabaseHelper {
     // prevent breaking some hard-coded flow tests. IDs in tests are allocated in a strictly
     // increasing sequence, if we don't pad out the ID here, we would have to renumber hundreds of
     // unit tests.
-    allocateId();
+    tm().reTransact(tm()::allocateId);
     PremiumListDao.save(premiumList);
     maybeAdvanceClock();
     return premiumList;
@@ -596,30 +594,36 @@ public final class DatabaseHelper {
       DateTime expirationTime) {
     String domainName = String.format("%s.%s", label, tld);
     String repoId = generateNewDomainRoid(tld);
-    Domain domain =
-        persistResource(
-            new Domain.Builder()
-                .setRepoId(repoId)
-                .setDomainName(domainName)
-                .setPersistedCurrentSponsorRegistrarId("TheRegistrar")
-                .setCreationRegistrarId("TheRegistrar")
-                .setCreationTimeForTest(creationTime)
-                .setRegistrationExpirationTime(expirationTime)
-                .setRegistrant(contact.createVKey())
-                .setContacts(
-                    ImmutableSet.of(
-                        DesignatedContact.create(Type.ADMIN, contact.createVKey()),
-                        DesignatedContact.create(Type.TECH, contact.createVKey())))
-                .setAuthInfo(DomainAuthInfo.create(PasswordAuth.create("fooBAR")))
-                .addGracePeriod(
-                    GracePeriod.create(
-                        GracePeriodStatus.ADD, repoId, now.plusDays(10), "TheRegistrar", null))
-                .build());
+    Domain.Builder domainBuilder =
+        new Domain.Builder()
+            .setRepoId(repoId)
+            .setDomainName(domainName)
+            .setPersistedCurrentSponsorRegistrarId("TheRegistrar")
+            .setCreationRegistrarId("TheRegistrar")
+            .setCreationTimeForTest(creationTime)
+            .setRegistrationExpirationTime(expirationTime)
+            .setRegistrant(Optional.of(contact.createVKey()))
+            .setContacts(
+                ImmutableSet.of(
+                    DesignatedContact.create(Type.ADMIN, contact.createVKey()),
+                    DesignatedContact.create(Type.TECH, contact.createVKey())))
+            .setAuthInfo(DomainAuthInfo.create(PasswordAuth.create("fooBAR")));
+    Duration addGracePeriodLength = Tld.get(tld).getAddGracePeriodLength();
+    if (creationTime.plus(addGracePeriodLength).isAfter(now)) {
+      domainBuilder.addGracePeriod(
+          GracePeriod.create(
+              GracePeriodStatus.ADD,
+              repoId,
+              creationTime.plus(addGracePeriodLength),
+              "TheRegistrar",
+              null));
+    }
+    Domain domain = persistResource(domainBuilder.build());
     DomainHistory historyEntryDomainCreate =
         persistResource(
             new DomainHistory.Builder()
                 .setType(HistoryEntry.Type.DOMAIN_CREATE)
-                .setModificationTime(now)
+                .setModificationTime(creationTime)
                 .setDomain(domain)
                 .setRegistrarId(domain.getCreationRegistrarId())
                 .build());
@@ -757,7 +761,7 @@ public final class DatabaseHelper {
   public static Registrar persistNewRegistrar(
       String registrarId,
       String registrarName,
-      Registrar.Type type,
+      RegistrarBase.Type type,
       @Nullable Long ianaIdentifier) {
     return persistSimpleResource(
         new Registrar.Builder()
@@ -778,7 +782,7 @@ public final class DatabaseHelper {
 
   /** Persists and returns a {@link Registrar} with the specified registrarId. */
   public static Registrar persistNewRegistrar(String registrarId) {
-    return persistNewRegistrar(registrarId, registrarId + " name", Registrar.Type.REAL, 100L);
+    return persistNewRegistrar(registrarId, registrarId + " name", Registrar.Type.REAL, 8L);
   }
 
   /** Persists and returns a list of {@link Registrar}s with the specified registrarIds. */
@@ -964,12 +968,12 @@ public final class DatabaseHelper {
 
   /** Returns a newly allocated, globally unique domain repoId of the format HEX-TLD. */
   public static String generateNewDomainRoid(String tld) {
-    return createDomainRepoId(allocateId(), tld);
+    return createDomainRepoId(tm().reTransact(tm()::allocateId), tld);
   }
 
   /** Returns a newly allocated, globally unique contact/host repoId of the format HEX_TLD-ROID. */
   public static String generateNewContactHostRoid() {
-    return createRepoId(allocateId(), getContactAndHostRoidSuffix());
+    return createRepoId(tm().reTransact(tm()::allocateId), getContactAndHostRoidSuffix());
   }
 
   /** Persists an object in the DB for tests. */
@@ -1014,6 +1018,35 @@ public final class DatabaseHelper {
             });
     maybeAdvanceClock();
     return tm().transact(() -> tm().loadByEntity(resource));
+  }
+
+  public static User loadExistingUser(String emailAddress) {
+    return loadByKey(VKey.create(User.class, emailAddress));
+  }
+
+  /** Persists an admin {@link User} with the given email address if it doesn't already exist. */
+  public static User createAdminUser(String emailAddress) {
+    // Reload the user to pick up the update time
+    return loadByEntity(
+        tm().transact(
+                () -> {
+                  VKey<User> key = VKey.create(User.class, emailAddress);
+                  Optional<User> existingUser = tm().loadByKeyIfPresent(key);
+                  if (existingUser.isPresent()) {
+                    return existingUser.get();
+                  }
+                  User user =
+                      new User.Builder()
+                          .setEmailAddress(emailAddress)
+                          .setUserRoles(
+                              new UserRoles.Builder()
+                                  .setGlobalRole(GlobalRole.FTE)
+                                  .setIsAdmin(true)
+                                  .build())
+                          .build();
+                  tm().put(user);
+                  return user;
+                }));
   }
 
   /** Returns all the history entries that are parented off the given EppResource. */
@@ -1142,6 +1175,10 @@ public final class DatabaseHelper {
     tm().transact(() -> tm().delete(resource));
   }
 
+  public static void deleteByKey(VKey<?> key) {
+    tm().transact(() -> tm().delete(key));
+  }
+
   /** Force the create and update timestamps to get written into the resource. */
   public static <R> R cloneAndSetAutoTimestamps(final R resource) {
     // We have to separate the read and write operation into different transactions otherwise JPA
@@ -1179,7 +1216,7 @@ public final class DatabaseHelper {
             () -> {
               ImmutableList<? extends Class<?>> entityClasses =
                   tm().getEntityManager().getMetamodel().getEntities().stream()
-                      .map(javax.persistence.metamodel.Type::getJavaType)
+                      .map(jakarta.persistence.metamodel.Type::getJavaType)
                       .collect(toImmutableList());
               ImmutableList.Builder<Object> result = new ImmutableList.Builder<>();
               for (Class<?> entityClass : entityClasses) {
@@ -1266,6 +1303,11 @@ public final class DatabaseHelper {
    */
   public static <T> ImmutableList<T> loadByEntitiesIfPresent(Iterable<T> entities) {
     return tm().transact(() -> tm().loadByEntitiesIfPresent(entities));
+  }
+
+  /** Loads the only instance of this particular class, or empty if none exists. */
+  public static <T> Optional<T> loadSingleton(Class<T> clazz) {
+    return tm().transact(() -> tm().loadSingleton(clazz));
   }
 
   /** Returns whether or not the given entity exists in Cloud SQL. */

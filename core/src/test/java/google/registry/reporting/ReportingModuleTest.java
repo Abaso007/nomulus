@@ -19,12 +19,11 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
-import com.google.common.truth.Truth8;
 import google.registry.request.HttpException.BadRequestException;
 import google.registry.testing.FakeClock;
 import google.registry.util.Clock;
+import jakarta.servlet.http.HttpServletRequest;
 import java.util.Optional;
-import javax.servlet.http.HttpServletRequest;
 import org.joda.time.DateTime;
 import org.joda.time.LocalDate;
 import org.joda.time.YearMonth;
@@ -45,14 +44,13 @@ class ReportingModuleTest {
   @Test
   void testEmptyYearMonthParameter_returnsEmptyYearMonthOptional() {
     when(req.getParameter("yearMonth")).thenReturn("");
-    Truth8.assertThat(ReportingModule.provideYearMonthOptional(req)).isEmpty();
+    assertThat(ReportingModule.provideYearMonthOptional(req)).isEmpty();
   }
 
   @Test
   void testValidYearMonthParameter_returnsThatMonth() {
     when(req.getParameter("yearMonth")).thenReturn("2017-05");
-    Truth8.assertThat(ReportingModule.provideYearMonthOptional(req))
-        .hasValue(new YearMonth(2017, 5));
+    assertThat(ReportingModule.provideYearMonthOptional(req)).hasValue(new YearMonth(2017, 5));
   }
 
   @Test
@@ -83,14 +81,13 @@ class ReportingModuleTest {
   @Test
   void testEmptyDateParameter_returnsEmptyDateOptional() {
     when(req.getParameter("date")).thenReturn("");
-    Truth8.assertThat(ReportingModule.provideDateOptional(req)).isEmpty();
+    assertThat(ReportingModule.provideDateOptional(req)).isEmpty();
   }
 
   @Test
   void testValidDateParameter_returnsThatDate() {
     when(req.getParameter("date")).thenReturn("2017-05-13");
-    Truth8.assertThat(ReportingModule.provideDateOptional(req))
-        .hasValue(new LocalDate(2017, 5, 13));
+    assertThat(ReportingModule.provideDateOptional(req)).hasValue(new LocalDate(2017, 5, 13));
   }
 
   @Test

@@ -46,20 +46,20 @@ import google.registry.model.transfer.TransferResponse.DomainTransferResponse;
 import google.registry.persistence.VKey;
 import google.registry.persistence.WithVKey;
 import google.registry.util.NullIgnoringCollectionBuilder;
+import jakarta.persistence.AttributeOverride;
+import jakarta.persistence.AttributeOverrides;
+import jakarta.persistence.Column;
+import jakarta.persistence.DiscriminatorColumn;
+import jakarta.persistence.DiscriminatorValue;
+import jakarta.persistence.Embedded;
+import jakarta.persistence.Entity;
+import jakarta.persistence.Id;
+import jakarta.persistence.Index;
+import jakarta.persistence.Inheritance;
+import jakarta.persistence.InheritanceType;
+import jakarta.persistence.PostLoad;
+import jakarta.persistence.Table;
 import java.util.Optional;
-import javax.persistence.AttributeOverride;
-import javax.persistence.AttributeOverrides;
-import javax.persistence.Column;
-import javax.persistence.DiscriminatorColumn;
-import javax.persistence.DiscriminatorValue;
-import javax.persistence.Embedded;
-import javax.persistence.Entity;
-import javax.persistence.Id;
-import javax.persistence.Index;
-import javax.persistence.Inheritance;
-import javax.persistence.InheritanceType;
-import javax.persistence.PostLoad;
-import javax.persistence.Table;
 import org.joda.time.DateTime;
 
 /**
@@ -86,7 +86,13 @@ import org.joda.time.DateTime;
 @ExternalMessagingName("message")
 @Inheritance(strategy = InheritanceType.SINGLE_TABLE)
 @DiscriminatorColumn(name = "type")
-@Table(indexes = {@Index(columnList = "registrar_id"), @Index(columnList = "eventTime")})
+@Table(
+    indexes = {
+      @Index(columnList = "domainRepoId"),
+      @Index(columnList = "registrarId"),
+      @Index(columnList = "eventTime"),
+      @Index(columnList = "domainRepoId,domainHistoryRevisionId")
+    })
 public abstract class PollMessage extends ImmutableObject
     implements Buildable, TransferServerApproveEntity, UnsafeSerializable {
 
@@ -524,8 +530,7 @@ public abstract class PollMessage extends ImmutableObject
         // Set the identifier according to the TransferResponse type.
         if (instance.transferResponse instanceof ContactTransferResponse) {
           instance.contactId = ((ContactTransferResponse) instance.transferResponse).getContactId();
-        } else if (instance.transferResponse instanceof DomainTransferResponse) {
-          DomainTransferResponse response = (DomainTransferResponse) instance.transferResponse;
+        } else if (instance.transferResponse instanceof DomainTransferResponse response) {
           instance.domainName = response.getDomainName();
           instance.extendedRegistrationExpirationTime =
               response.getExtendedRegistrationExpirationTime();

@@ -33,24 +33,22 @@ import com.google.api.services.gmail.Gmail.Users;
 import com.google.api.services.gmail.Gmail.Users.Messages;
 import com.google.api.services.gmail.Gmail.Users.Messages.Send;
 import com.google.api.services.gmail.model.Message;
+import com.google.common.collect.ImmutableList;
 import google.registry.groups.GmailClient.RetriableGmailExceptionPredicate;
 import google.registry.util.EmailMessage;
 import google.registry.util.EmailMessage.Attachment;
 import google.registry.util.Retrier;
 import google.registry.util.SystemSleeper;
+import jakarta.mail.Message.RecipientType;
+import jakarta.mail.Part;
+import jakarta.mail.internet.InternetAddress;
+import jakarta.mail.internet.MimeMessage;
+import jakarta.mail.internet.MimeMultipart;
 import java.io.OutputStream;
-import javax.mail.Message.RecipientType;
-import javax.mail.Part;
-import javax.mail.internet.InternetAddress;
-import javax.mail.internet.MimeMessage;
-import javax.mail.internet.MimeMultipart;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
-import org.mockito.invocation.InvocationOnMock;
 import org.mockito.junit.jupiter.MockitoExtension;
-import org.mockito.stubbing.Answer;
-import org.testcontainers.shaded.com.google.common.collect.ImmutableList;
 
 /** Unit tests for {@link GmailClient}. */
 @ExtendWith(MockitoExtension.class)
@@ -75,7 +73,6 @@ public class GmailClientTest {
         EmailMessage.create(
             "subject",
             "body",
-            new InternetAddress("from@example.com"),
             new InternetAddress("to@example.com"));
     Send gSend = mock(Send.class);
     Messages gMessages = mock(Messages.class);
@@ -93,7 +90,6 @@ public class GmailClientTest {
         EmailMessage.create(
             "subject",
             "body",
-            new InternetAddress("from@example.com"),
             new InternetAddress("to@example.com"));
     getGmailClient(false).sendEmail(message);
     verifyNoInteractions(gmail);
@@ -107,7 +103,6 @@ public class GmailClientTest {
     InternetAddress bccAddr = new InternetAddress("bcc@example.com");
     EmailMessage emailMessage =
         EmailMessage.newBuilder()
-            .setFrom(fromAddr)
             .setRecipients(ImmutableList.of(toAddr))
             .setSubject("My subject")
             .setBody("My body")
@@ -138,6 +133,7 @@ public class GmailClientTest {
     assertThat(attachment.getContentType()).startsWith(CSV_UTF_8.toString());
     assertThat(attachment.getContentType()).endsWith("name=filename");
     assertThat(attachment.getContent()).isEqualTo("foo,bar\nbaz,qux");
+    assertThat(attachment.getDisposition()).isEqualTo("attachment");
   }
 
   @Test
@@ -147,7 +143,6 @@ public class GmailClientTest {
     InternetAddress replyToAddr = new InternetAddress("some-addr@another.com");
     EmailMessage emailMessage =
         EmailMessage.newBuilder()
-            .setFrom(fromAddr)
             .setRecipients(ImmutableList.of(toAddr))
             .setReplyToEmailAddress(replyToAddr)
             .setSubject("My subject")
@@ -162,13 +157,10 @@ public class GmailClientTest {
     MimeMessage mimeMessage = mock(MimeMessage.class);
     byte[] data = "My content".getBytes(UTF_8);
     doAnswer(
-            new Answer() {
-              @Override
-              public Object answer(InvocationOnMock invocation) throws Throwable {
-                OutputStream os = invocation.getArgument(0);
-                os.write(data);
-                return null;
-              }
+            invocation -> {
+              OutputStream os = invocation.getArgument(0);
+              os.write(data);
+              return null;
             })
         .when(mimeMessage)
         .writeTo(any(OutputStream.class));

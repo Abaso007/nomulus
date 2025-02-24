@@ -60,10 +60,11 @@ public class EppServiceHandler extends HttpsRelayServiceHandler {
   public EppServiceHandler(
       String relayHost,
       String relayPath,
+      boolean canary,
       Supplier<String> idTokenSupplier,
       byte[] helloBytes,
       FrontendMetrics metrics) {
-    super(relayHost, relayPath, idTokenSupplier, metrics);
+    super(relayHost, relayPath, canary, idTokenSupplier, metrics);
     this.helloBytes = helloBytes.clone();
   }
 
@@ -124,6 +125,7 @@ public class EppServiceHandler extends HttpsRelayServiceHandler {
         .headers()
         .set(ProxyHttpHeaders.CERTIFICATE_HASH, sslClientCertificateHash)
         .set(ProxyHttpHeaders.IP_ADDRESS, clientAddress)
+        .set(ProxyHttpHeaders.FALLBACK_IP_ADDRESS, clientAddress)
         .set(HttpHeaderNames.CONTENT_TYPE, EPP_CONTENT_TYPE)
         .set(HttpHeaderNames.ACCEPT, EPP_CONTENT_TYPE);
     return request;

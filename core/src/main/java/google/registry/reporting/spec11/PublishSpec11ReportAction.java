@@ -17,10 +17,10 @@ package google.registry.reporting.spec11;
 import static com.google.common.collect.ImmutableSet.toImmutableSet;
 import static google.registry.reporting.ReportingModule.PARAM_DATE;
 import static google.registry.request.Action.Method.POST;
-import static javax.servlet.http.HttpServletResponse.SC_INTERNAL_SERVER_ERROR;
-import static javax.servlet.http.HttpServletResponse.SC_NO_CONTENT;
-import static javax.servlet.http.HttpServletResponse.SC_OK;
-import static javax.servlet.http.HttpServletResponse.SC_SERVICE_UNAVAILABLE;
+import static jakarta.servlet.http.HttpServletResponse.SC_INTERNAL_SERVER_ERROR;
+import static jakarta.servlet.http.HttpServletResponse.SC_NO_CONTENT;
+import static jakarta.servlet.http.HttpServletResponse.SC_OK;
+import static jakarta.servlet.http.HttpServletResponse.SC_SERVICE_UNAVAILABLE;
 
 import com.google.api.services.dataflow.Dataflow;
 import com.google.api.services.dataflow.model.Job;
@@ -38,6 +38,7 @@ import google.registry.config.RegistryConfig.Config;
 import google.registry.reporting.ReportingModule;
 import google.registry.reporting.spec11.soy.Spec11EmailSoyInfo;
 import google.registry.request.Action;
+import google.registry.request.Action.GaeService;
 import google.registry.request.Parameter;
 import google.registry.request.Response;
 import google.registry.request.auth.Auth;
@@ -56,10 +57,10 @@ import org.json.JSONException;
  * ImmutableSet)} on success or {@link Spec11EmailUtils#sendAlertEmail(String, String)} on failure.
  */
 @Action(
-    service = Action.Service.BACKEND,
+    service = GaeService.BACKEND,
     path = PublishSpec11ReportAction.PATH,
     method = POST,
-    auth = Auth.AUTH_API_ADMIN)
+    auth = Auth.AUTH_ADMIN)
 public class PublishSpec11ReportAction implements Runnable {
 
   static final String PATH = "/_dr/task/publishSpec11";
@@ -107,7 +108,7 @@ public class PublishSpec11ReportAction implements Runnable {
       Job job = dataflow.projects().locations().jobs().get(projectId, jobRegion, jobId).execute();
       String state = job.getCurrentState();
       switch (state) {
-        case JOB_DONE:
+        case JOB_DONE -> {
           logger.atInfo().log("Dataflow job %s finished successfully, publishing results.", jobId);
           response.setStatus(SC_OK);
           if (shouldSendMonthlySpec11Email()) {
@@ -125,18 +126,18 @@ public class PublishSpec11ReportAction implements Runnable {
               response.setStatus(SC_NO_CONTENT);
             }
           }
-          break;
-        case JOB_FAILED:
+        }
+        case JOB_FAILED -> {
           logger.atSevere().log("Dataflow job %s finished unsuccessfully.", jobId);
           response.setStatus(SC_NO_CONTENT);
           emailUtils.sendAlertEmail(
               String.format("Spec11 Dataflow Pipeline Failure %s", date),
               String.format("Spec11 %s job %s ended in status failure.", date, jobId));
-          break;
-        default:
+        }
+        default -> {
           logger.atInfo().log("Job in non-terminal state %s, retrying:", state);
           response.setStatus(SC_SERVICE_UNAVAILABLE);
-          break;
+        }
       }
     } catch (IOException | JSONException e) {
       logger.atSevere().withCause(e).log("Failed to publish Spec11 reports.");

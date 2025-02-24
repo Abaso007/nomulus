@@ -30,6 +30,7 @@ import static java.nio.charset.StandardCharsets.UTF_8;
 
 import com.beust.jcommander.Parameter;
 import com.beust.jcommander.Parameters;
+import com.beust.jcommander.internal.Nullable;
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Joiner;
 import com.google.common.base.Splitter;
@@ -46,6 +47,7 @@ import google.registry.model.domain.token.AllocationToken.RegistrationBehavior;
 import google.registry.model.domain.token.AllocationToken.TokenStatus;
 import google.registry.model.domain.token.AllocationToken.TokenType;
 import google.registry.persistence.VKey;
+import google.registry.tools.params.MoneyParameter;
 import google.registry.tools.params.TransitionListParameter.TokenStatusTransitions;
 import google.registry.util.CollectionUtils;
 import google.registry.util.DomainNameUtils;
@@ -62,6 +64,7 @@ import java.util.stream.Collectors;
 import java.util.stream.Stream;
 import javax.inject.Inject;
 import javax.inject.Named;
+import org.joda.money.Money;
 import org.joda.time.DateTime;
 
 /** Command to generate and persist {@link AllocationToken}s. */
@@ -139,6 +142,17 @@ class GenerateAllocationTokensCommand implements Command {
   private Boolean discountPremiums;
 
   @Parameter(
+      names = {"--discount_price"},
+      description =
+          "A discount that allows the setting of promotional prices. This field is different from "
+              + "{@code discountFraction} because the price set here is treated as the domain "
+              + "price, versus {@code discountFraction} that applies a fraction discount to the "
+              + "domain base price. Use CURRENCY PRICE format, example: USD 777.99",
+      converter = MoneyParameter.class,
+      validateWith = MoneyParameter.class)
+  private Money discountPrice;
+
+  @Parameter(
       names = {"--discount_years"},
       description = "The number of years the discount applies for. Default is 1, max value is 10.")
   private Integer discountYears;
@@ -158,9 +172,15 @@ class GenerateAllocationTokensCommand implements Command {
           "The type of renewal price behavior, either DEFAULT (default), NONPREMIUM, or SPECIFIED."
               + " This indicates how a domain should be charged for renewal. By default, a domain"
               + " will be renewed at the renewal price from the pricing engine. If the renewal"
-              + " price behavior is set to SPECIFIED, it means that the renewal cost will be the"
-              + " same as the domain's calculated create price.")
+              + " price behavior is set to SPECIFIED, it means that the renewal cost will be equal"
+              + " to the provided renewal price.")
   private RenewalPriceBehavior renewalPriceBehavior = DEFAULT;
+
+  @Parameter(
+      names = {"--renewal_price"},
+      description = "The renewal price amount iff the renewal price behavior is SPECIFIED.")
+  @Nullable
+  private Money renewalPrice;
 
   @Parameter(
       names = {"--registration_behavior"},
@@ -225,9 +245,11 @@ class GenerateAllocationTokensCommand implements Command {
                                         .collect(toImmutableSet()));
                     Optional.ofNullable(discountFraction).ifPresent(token::setDiscountFraction);
                     Optional.ofNullable(discountPremiums).ifPresent(token::setDiscountPremiums);
+                    Optional.ofNullable(discountPrice).ifPresent(token::setDiscountPrice);
                     Optional.ofNullable(discountYears).ifPresent(token::setDiscountYears);
                     Optional.ofNullable(tokenStatusTransitions)
                         .ifPresent(token::setTokenStatusTransitions);
+                    Optional.ofNullable(renewalPrice).ifPresent(token::setRenewalPrice);
                     Optional.ofNullable(domainNames)
                         .ifPresent(d -> token.setDomainName(d.removeFirst()));
                     return token.build();
@@ -284,7 +306,7 @@ class GenerateAllocationTokensCommand implements Command {
       // tokens should only be scheduled to end with a brief time period before the status
       // transition occurs so that no new domains are registered using that token between when the
       // status is scheduled and when the transition occurs.
-      // TODO(@sarahbot): Create a cleaner way to handle ending bulk pricing packages once we
+      // TODO(b/261763205): Create a cleaner way to handle ending bulk pricing packages once we
       // actually have customers using them
       boolean hasEnding =
           tokenStatusTransitions.containsValue(TokenStatus.ENDED)
@@ -294,6 +316,10 @@ class GenerateAllocationTokensCommand implements Command {
           "BULK_PRICING tokens should not be generated with ENDED or CANCELLED in their transition"
               + " map");
     }
+
+    checkArgument(
+        renewalPriceBehavior.equals(RenewalPriceBehavior.SPECIFIED) == (renewalPrice != null),
+        "renewal_price must be specified iff renewal_price_behavior is SPECIFIED");
 
     if (tokenStrings != null) {
       verifyTokenStringsDoNotExist();

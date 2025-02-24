@@ -36,16 +36,17 @@ import google.registry.groups.GmailClient;
 import google.registry.model.registrar.Registrar;
 import google.registry.model.registrar.RegistrarAddress;
 import google.registry.model.registrar.RegistrarPoc;
-import google.registry.model.registrar.RegistrarPoc.Type;
+import google.registry.model.registrar.RegistrarPocBase;
+import google.registry.model.registrar.RegistrarPocBase.Type;
 import google.registry.persistence.transaction.JpaTestExtensions;
 import google.registry.persistence.transaction.JpaTestExtensions.JpaIntegrationTestExtension;
 import google.registry.testing.FakeClock;
 import google.registry.testing.FakeResponse;
 import google.registry.util.SelfSignedCaCertificate;
+import jakarta.mail.internet.InternetAddress;
 import java.security.cert.X509Certificate;
 import java.util.Optional;
 import javax.annotation.Nullable;
-import javax.mail.internet.InternetAddress;
 import org.joda.time.DateTime;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -55,18 +56,14 @@ import org.junit.jupiter.api.extension.RegisterExtension;
 class SendExpiringCertificateNotificationEmailActionTest {
 
   private static final String EXPIRATION_WARNING_EMAIL_BODY_TEXT =
-      " Dear %1$s,\n"
-          + '\n'
-          + "We would like to inform you that your %2$s certificate will expire at %3$s."
-          + '\n'
-          + " Kind update your account using the following steps: "
-          + '\n'
-          + "  1. Navigate to support and login using your %4$s@registry.example credentials.\n"
-          + "  2. Click Settings -> Privacy on the top left corner.\n"
-          + "  3. Click Edit and enter certificate string."
-          + "  3. Click Save"
-          + "Regards,"
-          + "Example Registry";
+      """
+           Dear %1$s,
+
+          We would like to inform you that your %2$s certificate will expire at %3$s.
+           Kind update your account using the following steps:
+            1. Navigate to support and login using your %4$s@registry.example credentials.
+            2. Click Settings -> Privacy on the top left corner.
+            3. Click Edit and enter certificate string.  3. Click SaveRegards,Example Registry""";
 
   private static final String EXPIRATION_WARNING_EMAIL_SUBJECT_TEXT = "Expiration Warning Email";
 
@@ -98,7 +95,6 @@ class SendExpiringCertificateNotificationEmailActionTest {
         new SendExpiringCertificateNotificationEmailAction(
             EXPIRATION_WARNING_EMAIL_BODY_TEXT,
             EXPIRATION_WARNING_EMAIL_SUBJECT_TEXT,
-            new InternetAddress("test@example.com"),
             sendEmailService,
             certificateChecker,
             response);
@@ -224,7 +220,7 @@ class SendExpiringCertificateNotificationEmailActionTest {
                 .setEmailAddress("will@example-registrar.tld")
                 .setPhoneNumber("+1.3105551213")
                 .setFaxNumber("+1.3105551213")
-                .setTypes(ImmutableSet.of(RegistrarPoc.Type.TECH))
+                .setTypes(ImmutableSet.of(RegistrarPocBase.Type.TECH))
                 .setVisibleInWhoisAsAdmin(true)
                 .setVisibleInWhoisAsTech(false)
                 .build());
@@ -514,7 +510,7 @@ class SendExpiringCertificateNotificationEmailActionTest {
                 .setEmailAddress("jd@example-registrar.tld")
                 .setPhoneNumber("+1.3105551213")
                 .setFaxNumber("+1.3105551213")
-                .setTypes(ImmutableSet.of(RegistrarPoc.Type.TECH))
+                .setTypes(ImmutableSet.of(RegistrarPocBase.Type.TECH))
                 .setVisibleInWhoisAsAdmin(true)
                 .setVisibleInWhoisAsTech(false)
                 .build(),
@@ -524,7 +520,7 @@ class SendExpiringCertificateNotificationEmailActionTest {
                 .setEmailAddress("js@example-registrar.tld")
                 .setPhoneNumber("+1.1111111111")
                 .setFaxNumber("+1.1111111111")
-                .setTypes(ImmutableSet.of(RegistrarPoc.Type.TECH))
+                .setTypes(ImmutableSet.of(RegistrarPocBase.Type.TECH))
                 .build(),
             new RegistrarPoc.Builder()
                 .setRegistrar(registrar)
@@ -532,7 +528,7 @@ class SendExpiringCertificateNotificationEmailActionTest {
                 .setEmailAddress("will@example-registrar.tld")
                 .setPhoneNumber("+1.3105551213")
                 .setFaxNumber("+1.3105551213")
-                .setTypes(ImmutableSet.of(RegistrarPoc.Type.TECH))
+                .setTypes(ImmutableSet.of(RegistrarPocBase.Type.TECH))
                 .setVisibleInWhoisAsAdmin(true)
                 .setVisibleInWhoisAsTech(false)
                 .build(),
@@ -542,7 +538,7 @@ class SendExpiringCertificateNotificationEmailActionTest {
                 .setEmailAddress("mike@example-registrar.tld")
                 .setPhoneNumber("+1.1111111111")
                 .setFaxNumber("+1.1111111111")
-                .setTypes(ImmutableSet.of(RegistrarPoc.Type.ADMIN))
+                .setTypes(ImmutableSet.of(RegistrarPocBase.Type.ADMIN))
                 .build(),
             new RegistrarPoc.Builder()
                 .setRegistrar(registrar)
@@ -550,7 +546,7 @@ class SendExpiringCertificateNotificationEmailActionTest {
                 .setEmailAddress("john@example-registrar.tld")
                 .setPhoneNumber("+1.3105551215")
                 .setFaxNumber("+1.3105551216")
-                .setTypes(ImmutableSet.of(RegistrarPoc.Type.ADMIN))
+                .setTypes(ImmutableSet.of(RegistrarPocBase.Type.ADMIN))
                 .setVisibleInWhoisAsTech(true)
                 .build());
     persistSimpleResources(contacts);
@@ -582,10 +578,7 @@ class SendExpiringCertificateNotificationEmailActionTest {
     String registrarId = "registrarid";
     String emailBody =
         action.getEmailBody(
-            registrarName,
-            certificateType,
-            DateTime.parse(certExpirationDateStr).toDate(),
-            registrarId);
+            registrarName, certificateType, DateTime.parse(certExpirationDateStr), registrarId);
     assertThat(emailBody).contains(registrarName);
     assertThat(emailBody).contains(certificateType.getDisplayName());
     assertThat(emailBody).contains(certExpirationDateStr);
@@ -614,7 +607,7 @@ class SendExpiringCertificateNotificationEmailActionTest {
             IllegalArgumentException.class,
             () ->
                 action.getEmailBody(
-                    "good registrar", null, DateTime.parse("2021-06-15").toDate(), "registrarId"));
+                    "good registrar", null, DateTime.parse("2021-06-15"), "registrarId"));
     assertThat(thrown).hasMessageThat().contains("Certificate type cannot be null");
   }
 
@@ -627,7 +620,7 @@ class SendExpiringCertificateNotificationEmailActionTest {
                 action.getEmailBody(
                     "good registrar",
                     CertificateType.FAILOVER,
-                    DateTime.parse("2021-06-15").toDate(),
+                    DateTime.parse("2021-06-15"),
                     null));
     assertThat(thrown).hasMessageThat().contains("Registrar Id cannot be null");
   }
@@ -707,7 +700,7 @@ class SendExpiringCertificateNotificationEmailActionTest {
 
   /** Returns persisted sample contacts with a customized contact email type. */
   private static ImmutableList<RegistrarPoc> persistSampleContacts(
-      Registrar registrar, RegistrarPoc.Type emailType) {
+      Registrar registrar, RegistrarPocBase.Type emailType) {
     return persistSimpleResources(
         ImmutableList.of(
             new RegistrarPoc.Builder()

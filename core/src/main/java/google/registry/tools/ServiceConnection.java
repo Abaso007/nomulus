@@ -19,6 +19,8 @@ import static com.google.common.base.Strings.isNullOrEmpty;
 import static com.google.common.base.Verify.verify;
 import static com.google.common.net.HttpHeaders.X_REQUESTED_WITH;
 import static com.google.common.net.MediaType.JSON_UTF_8;
+import static google.registry.config.ConfigUtils.makeUrl;
+import static google.registry.config.RegistryConfig.CANARY_HEADER;
 import static google.registry.security.JsonHttp.JSON_SAFETY_PREFIX;
 import static java.nio.charset.StandardCharsets.UTF_8;
 
@@ -33,13 +35,13 @@ import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
 import com.google.common.io.CharStreams;
 import com.google.common.net.MediaType;
-import com.google.re2j.Matcher;
 import com.google.re2j.Pattern;
-import google.registry.config.RegistryConfig;
+import google.registry.config.RegistryConfig.Config;
+import google.registry.request.Action.GaeService;
+import google.registry.request.Action.GkeService;
 import google.registry.request.Action.Service;
 import java.io.IOException;
 import java.io.InputStreamReader;
-import java.net.MalformedURLException;
 import java.net.URL;
 import java.util.Map;
 import javax.annotation.Nullable;
@@ -49,22 +51,24 @@ import org.json.simple.JSONValue;
 /**
  * An HTTP connection to a service.
  *
- * <p>By default - connects to the TOOLS service. To create a Connection to another service, call
- * the {@link #withService} function.
+ * <p>By default - connects to the TOOLS service in GAE and the BACKEND service in GKE. To create a
+ * Connection to another service, call the {@link #withService} function.
  */
 public class ServiceConnection {
 
   /** Pattern to heuristically extract title tag contents in HTML responses. */
-  private static final Pattern HTML_TITLE_TAG_PATTERN = Pattern.compile("<title>(.*?)</title>");
+  protected static final Pattern HTML_TITLE_TAG_PATTERN = Pattern.compile("<title>(.*?)</title>");
 
-  @Inject HttpRequestFactory requestFactory;
   private final Service service;
   private final boolean useCanary;
+  private final HttpRequestFactory requestFactory;
 
   @Inject
-  ServiceConnection() {
-    service = Service.TOOLS;
-    useCanary = false;
+  ServiceConnection(
+      @Config("useGke") boolean useGke,
+      @Config("useCanary") boolean useCanary,
+      HttpRequestFactory requestFactory) {
+    this(useGke ? GkeService.BACKEND : GaeService.TOOLS, requestFactory, useCanary);
   }
 
   private ServiceConnection(Service service, HttpRequestFactory requestFactory, boolean useCanary) {
@@ -74,14 +78,16 @@ public class ServiceConnection {
   }
 
   /** Returns a copy of this connection that talks to a different service endpoint. */
-  public ServiceConnection withService(Service service, boolean isCanary) {
-    return new ServiceConnection(service, requestFactory, isCanary);
-  }
-
-  /** Returns the contents of the title tag in the given HTML, or null if not found. */
-  private static String extractHtmlTitle(String html) {
-    Matcher matcher = HTML_TITLE_TAG_PATTERN.matcher(html);
-    return (matcher.find() ? matcher.group(1) : null);
+  public ServiceConnection withService(Service service, boolean useCanary) {
+    Class<? extends Service> oldServiceClazz = this.service.getClass();
+    Class<? extends Service> newServiceClazz = service.getClass();
+    if (oldServiceClazz != newServiceClazz) {
+      throw new IllegalArgumentException(
+          String.format(
+              "Cannot switch from %s to %s",
+              oldServiceClazz.getSimpleName(), newServiceClazz.getSimpleName()));
+    }
+    return new ServiceConnection(service, requestFactory, useCanary);
   }
 
   /** Returns the HTML from the connection error stream, if any, otherwise the empty string. */
@@ -102,19 +108,22 @@ public class ServiceConnection {
     HttpHeaders headers = request.getHeaders();
     headers.setCacheControl("no-cache");
     headers.put(X_REQUESTED_WITH, ImmutableList.of("RegistryTool"));
+    if (useCanary) {
+      headers.set(CANARY_HEADER, "true");
+    }
     request.setHeaders(headers);
     request.setFollowRedirects(false);
     request.setThrowExceptionOnExecuteError(false);
     request.setUnsuccessfulResponseHandler(
         (request1, response, supportsRetry) -> {
-          String errorTitle = extractHtmlTitle(getErrorHtmlAsString(response));
+          String error = getErrorHtmlAsString(response);
           throw new IOException(
               String.format(
                   "Error from %s: %d %s%s",
                   request1.getUrl().toString(),
                   response.getStatusCode(),
                   response.getStatusMessage(),
-                  (errorTitle == null ? "" : ": " + errorTitle)));
+                  error));
         });
     HttpResponse response = null;
     try {
@@ -129,14 +138,13 @@ public class ServiceConnection {
 
   @VisibleForTesting
   URL getServer() {
-    URL url = getServer(service);
-    if (useCanary) {
-      verify(!isNullOrEmpty(url.getHost()), "Null host in url");
-      try {
-        return new URL(url.getProtocol(), "nomulus-dot-" + url.getHost(), url.getFile());
-      } catch (MalformedURLException e) {
-        throw new RuntimeException(e);
-      }
+    URL url = service.getServiceUrl();
+    verify(!isNullOrEmpty(url.getHost()), "Null host in url");
+    if (useCanary && service instanceof GaeService) {
+      url =
+          makeUrl(
+              String.format(
+                  "%s://nomulus-dot-%s%s", url.getProtocol(), url.getHost(), url.getFile()));
     }
     return url;
   }
@@ -160,19 +168,5 @@ public class ServiceConnection {
             JSON_UTF_8,
             JSONValue.toJSONString(object).getBytes(UTF_8));
     return (Map<String, Object>) JSONValue.parse(response.substring(JSON_SAFETY_PREFIX.length()));
-  }
-
-  public static URL getServer(Service service) {
-    switch (service) {
-      case DEFAULT:
-        return RegistryConfig.getDefaultServer();
-      case TOOLS:
-        return RegistryConfig.getToolsServer();
-      case BACKEND:
-        return RegistryConfig.getBackendServer();
-      case PUBAPI:
-        return RegistryConfig.getPubapiServer();
-    }
-    throw new IllegalStateException("Unknown service: " + service);
   }
 }

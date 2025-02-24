@@ -34,12 +34,14 @@ import google.registry.model.domain.token.AllocationToken;
 import google.registry.model.domain.token.AllocationToken.RegistrationBehavior;
 import google.registry.model.domain.token.AllocationToken.TokenStatus;
 import google.registry.model.domain.token.AllocationToken.TokenType;
+import google.registry.tools.params.MoneyParameter;
 import google.registry.tools.params.StringListParameter;
 import google.registry.tools.params.TransitionListParameter.TokenStatusTransitions;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.function.Function;
+import org.joda.money.Money;
 import org.joda.time.DateTime;
 
 /** Command to update existing {@link AllocationToken}s. */
@@ -52,7 +54,7 @@ import org.joda.time.DateTime;
 final class UpdateAllocationTokensCommand extends UpdateOrDeleteAllocationTokensCommand {
 
   @Parameter(
-      names = {"--allowed_client_ids"},
+      names = {"-c", "--allowed_client_ids"},
       description =
           "Comma-separated list of allowed client IDs. Use the empty string to clear the "
               + "existing list.",
@@ -60,7 +62,7 @@ final class UpdateAllocationTokensCommand extends UpdateOrDeleteAllocationTokens
   private List<String> allowedClientIds;
 
   @Parameter(
-      names = {"--allowed_tlds"},
+      names = {"-t", "--allowed_tlds"},
       description =
           "Comma-separated list of allowed TLDs. Use the empty string to clear the "
               + "existing list.",
@@ -91,7 +93,18 @@ final class UpdateAllocationTokensCommand extends UpdateOrDeleteAllocationTokens
   private Boolean discountPremiums;
 
   @Parameter(
-      names = {"--discount_years"},
+      names = {"--discount_price"},
+      description =
+          "A discount that allows the setting of promotional prices. This field is different from "
+              + "{@code discountFraction} because the price set here is treated as the domain "
+              + "price, versus {@code discountFraction} that applies a fraction discount to the "
+              + "domain base price. Use CURRENCY PRICE format, example: USD 777.99",
+      converter = MoneyParameter.class,
+      validateWith = MoneyParameter.class)
+  private Money discountPrice;
+
+  @Parameter(
+      names = {"-y", "--discount_years"},
       description = "The number of years the discount applies for. Default is 1, max value is 10.")
   private Integer discountYears;
 
@@ -110,10 +123,16 @@ final class UpdateAllocationTokensCommand extends UpdateOrDeleteAllocationTokens
           "The type of renewal price behavior, either DEFAULT (default), NONPREMIUM, or SPECIFIED."
               + " This indicates how a domain should be charged for renewal. By default, a domain"
               + " will be renewed at the renewal price from the pricing engine. If the renewal"
-              + " price behavior is set to SPECIFIED, it means that the renewal cost will be the"
-              + " same as the domain's calculated create price.")
+              + " price behavior is set to SPECIFIED, it means that the renewal cost will be equal"
+              + " to the provided renewal price.")
   @Nullable
   private RenewalPriceBehavior renewalPriceBehavior;
+
+  @Parameter(
+      names = {"--renewal_price"},
+      description = "The renewal price amount iff the renewal price behavior is SPECIFIED.")
+  @Nullable
+  private Money renewalPrice;
 
   @Parameter(
       names = {"--registration_behavior"},
@@ -189,17 +208,23 @@ final class UpdateAllocationTokensCommand extends UpdateOrDeleteAllocationTokens
         .ifPresent(tlds -> builder.setAllowedTlds(ImmutableSet.copyOf(tlds)));
     Optional.ofNullable(allowedEppActions)
         .ifPresent(
-            eppActions -> {
-              builder.setAllowedEppActions(
-                  eppActions.stream()
-                      .map(CommandName::parseKnownCommand)
-                      .collect(toImmutableSet()));
-            });
+            eppActions ->
+                builder.setAllowedEppActions(
+                    eppActions.stream()
+                        .map(CommandName::parseKnownCommand)
+                        .collect(toImmutableSet())));
     Optional.ofNullable(discountFraction).ifPresent(builder::setDiscountFraction);
     Optional.ofNullable(discountPremiums).ifPresent(builder::setDiscountPremiums);
+    Optional.ofNullable(discountPrice).ifPresent(builder::setDiscountPrice);
     Optional.ofNullable(discountYears).ifPresent(builder::setDiscountYears);
     Optional.ofNullable(tokenStatusTransitions).ifPresent(builder::setTokenStatusTransitions);
+
+    if (renewalPriceBehavior != null
+        && renewalPriceBehavior != original.getRenewalPriceBehavior()) {
+      builder.setRenewalPrice(null);
+    }
     Optional.ofNullable(renewalPriceBehavior).ifPresent(builder::setRenewalPriceBehavior);
+    Optional.ofNullable(renewalPrice).ifPresent(builder::setRenewalPrice);
     Optional.ofNullable(registrationBehavior).ifPresent(builder::setRegistrationBehavior);
     return builder.build();
   }
@@ -208,7 +233,7 @@ final class UpdateAllocationTokensCommand extends UpdateOrDeleteAllocationTokens
     if (!dryRun) {
       tm().putAll(batch);
     }
-    System.out.printf(
+    printStream.printf(
         "%s tokens: %s\n",
         dryRun ? "Would update" : "Updated",
         JOINER.join(

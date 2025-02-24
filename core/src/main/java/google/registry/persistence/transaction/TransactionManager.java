@@ -22,7 +22,7 @@ import google.registry.persistence.PersistenceModule.TransactionIsolationLevel;
 import google.registry.persistence.VKey;
 import java.util.NoSuchElementException;
 import java.util.Optional;
-import java.util.function.Supplier;
+import java.util.concurrent.Callable;
 import java.util.stream.Stream;
 import org.joda.time.DateTime;
 
@@ -34,8 +34,9 @@ public interface TransactionManager {
   /**
    * Returns {@code true} if the caller is in a transaction.
    *
-   * <p>Note that this function is kept for backward compatibility. We will review the use case
-   * later when adding the cloud sql implementation.
+   * <p>Note that in the current implementation the entity manager is obtained from a static {@code
+   * ThreadLocal} object that is set up by the outermost {@link #transact} call. Nested call sites
+   * have no control over which database instance to use.
    */
   boolean inTransaction();
 
@@ -47,52 +48,85 @@ public interface TransactionManager {
    */
   void assertInTransaction();
 
+  /**
+   * Returns a {@link long} value that can be used as {@code id} by a JPA model entity.
+   *
+   * <p>The returned value must be project-wide unique when transacting on the primary database
+   * instance, but only needs to be unique within a JVM instance when transacting on the replica
+   * instance.
+   */
+  long allocateId();
+
   /** Executes the work in a transaction and returns the result. */
-  <T> T transact(Supplier<T> work);
+  <T> T transact(Callable<T> work);
 
   /**
    * Executes the work in a transaction at the given {@link TransactionIsolationLevel} and returns
    * the result.
    */
-  <T> T transact(Supplier<T> work, TransactionIsolationLevel isolationLevel);
+  <T> T transact(TransactionIsolationLevel isolationLevel, Callable<T> work);
+
+  /**
+   * Executes the work in a transaction and returns the result, without retrying upon retryable
+   * exceptions.
+   *
+   * <p>This method should only be used when the transaction contains side effects that are not
+   * rolled back by the transaction manager, for example in {@link
+   * google.registry.beam.common.RegistryJpaIO} where the results from a query are streamed to the
+   * next transformation inside a transaction, as the result stream has to materialize to a list
+   * outside a transaction and doing so would greatly affect the parallelism of the pipeline.
+   */
+  <T> T transactNoRetry(Callable<T> work);
+
+  /**
+   * Executes the work in a transaction at the given {@link TransactionIsolationLevel} and returns
+   * the result, without retrying upon retryable exceptions.
+   *
+   * <p>This method should only be used when the transaction contains side effects that are not
+   * rolled back by the transaction manager, for example in {@link
+   * google.registry.beam.common.RegistryJpaIO} where the results from a query are streamed to the
+   * next transformation inside a transaction, as the result stream has to materialize to a list
+   * outside a transaction and doing so would greatly affect the parallelism of the pipeline.
+   */
+  <T> T transactNoRetry(TransactionIsolationLevel isolationLevel, Callable<T> work);
 
   /**
    * Executes the work in a (potentially wrapped) transaction and returns the result.
    *
    * <p>Calls to this method are typically going to be in inner functions, that are called either as
-   * top-level transactions themselves or are nested inside of larger transactions (e.g. a
+   * top-level transactions themselves or are nested inside larger transactions (e.g. a
    * transactional flow). Invocations of reTransact must be vetted to occur in both situations and
    * with such complexity that it is not trivial to refactor out the nested transaction calls. New
    * code should be written in such a way as to avoid requiring reTransact in the first place.
    *
-   * <p>In the future we will be enforcing that {@link #transact(Supplier)} calls be top-level only,
+   * <p>In the future we will be enforcing that {@link #transact(Callable)} calls be top-level only,
    * with reTransact calls being the only ones that can potentially be an inner nested transaction
    * (which is a noop). Note that, as this can be a nested inner exception, there is no overload
    * provided to specify a (potentially conflicting) transaction isolation level.
    */
-  <T> T reTransact(Supplier<T> work);
+  <T> T reTransact(Callable<T> work);
 
   /** Executes the work in a transaction. */
-  void transact(Runnable work);
+  void transact(ThrowingRunnable work);
 
   /** Executes the work in a transaction at the given {@link TransactionIsolationLevel}. */
-  void transact(Runnable work, TransactionIsolationLevel isolationLevel);
+  void transact(TransactionIsolationLevel isolationLevel, ThrowingRunnable work);
 
   /**
    * Executes the work in a (potentially wrapped) transaction and returns the result.
    *
    * <p>Calls to this method are typically going to be in inner functions, that are called either as
-   * top-level transactions themselves or are nested inside of larger transactions (e.g. a
+   * top-level transactions themselves or are nested inside larger transactions (e.g. a
    * transactional flow). Invocations of reTransact must be vetted to occur in both situations and
    * with such complexity that it is not trivial to refactor out the nested transaction calls. New
    * code should be written in such a way as to avoid requiring reTransact in the first place.
    *
-   * <p>In the future we will be enforcing that {@link #transact(Runnable)} calls be top-level only,
-   * with reTransact calls being the only ones that can potentially be an inner nested transaction
-   * (which is a noop). Note that, as this can be a nested inner exception, there is no overload *
-   * provided to specify a (potentially conflicting) transaction isolation level.
+   * <p>In the future we will be enforcing that {@link #transact(ThrowingRunnable)} calls be
+   * top-level only, with reTransact calls being the only ones that can potentially be an inner
+   * nested transaction (which is a noop). Note that, as this can be a nested inner exception, there
+   * is no overload provided to specify a (potentially conflicting) transaction isolation level.
    */
-  void reTransact(Runnable work);
+  void reTransact(ThrowingRunnable work);
 
   /** Returns the time associated with the start of this particular transaction attempt. */
   DateTime getTransactionTime();
@@ -216,4 +250,15 @@ public interface TransactionManager {
 
   /** Returns a QueryComposer which can be used to perform queries against the current database. */
   <T> QueryComposer<T> createQueryComposer(Class<T> entity);
+
+  /**
+   * A runnable that allows for checked exceptions to be thrown.
+   *
+   * <p>This makes it easier to write lambdas without having to worry about wrapping and re-throwing
+   * checked excpetions as unchecked ones.
+   */
+  @FunctionalInterface
+  interface ThrowingRunnable {
+    void run() throws Exception;
+  }
 }

@@ -27,6 +27,10 @@ import static google.registry.beam.rde.RdePipeline.TupleTags.REVISION_ID;
 import static google.registry.beam.rde.RdePipeline.TupleTags.SUPERORDINATE_DOMAINS;
 import static google.registry.model.reporting.HistoryEntryDao.RESOURCE_TYPES_TO_HISTORY_TYPES;
 import static google.registry.persistence.transaction.TransactionManagerFactory.tm;
+import static google.registry.util.SafeSerializationUtils.safeDeserializeCollection;
+import static google.registry.util.SafeSerializationUtils.serializeCollection;
+import static google.registry.util.SerializeUtils.decodeBase64;
+import static google.registry.util.SerializeUtils.encodeBase64;
 import static org.apache.beam.sdk.values.TypeDescriptors.kvs;
 
 import com.google.common.collect.ImmutableList;
@@ -54,7 +58,7 @@ import google.registry.model.host.Host;
 import google.registry.model.host.HostHistory;
 import google.registry.model.rde.RdeMode;
 import google.registry.model.registrar.Registrar;
-import google.registry.model.registrar.Registrar.Type;
+import google.registry.model.registrar.RegistrarBase.Type;
 import google.registry.model.reporting.HistoryEntry;
 import google.registry.model.reporting.HistoryEntry.HistoryEntryId;
 import google.registry.persistence.PersistenceModule.TransactionIsolationLevel;
@@ -65,11 +69,7 @@ import google.registry.rde.PendingDeposit.PendingDepositCoder;
 import google.registry.rde.RdeMarshaller;
 import google.registry.util.UtilsModule;
 import google.registry.xml.ValidationMode;
-import java.io.ByteArrayInputStream;
-import java.io.ByteArrayOutputStream;
 import java.io.IOException;
-import java.io.ObjectInputStream;
-import java.io.ObjectOutputStream;
 import java.io.Serializable;
 import java.util.HashSet;
 import javax.inject.Inject;
@@ -116,14 +116,14 @@ import org.joda.time.DateTime;
  * <p>The pipeline is broadly divided into two parts -- creating the {@link DepositFragment}s, and
  * processing them.
  *
- * <h1>Creating {@link DepositFragment}</h1>
+ * <h2>Creating {@link DepositFragment}</h2>
  *
- * <h2>{@link Registrar}</h2>
+ * <h3>{@link Registrar}</h3>
  *
  * Non-test registrar entities are loaded from Cloud SQL and marshalled into deposit fragments. They
  * are <b>NOT</b> rewound to the watermark.
  *
- * <h2>{@link EppResource}</h2>
+ * <h3>{@link EppResource}</h3>
  *
  * All EPP resources are loaded from the corresponding {@link HistoryEntry}, which has the resource
  * embedded. In general, we find most recent history entry before watermark and filter out the ones
@@ -158,7 +158,7 @@ import org.joda.time.DateTime;
  * watermark to the domain at watermark. We then proceed to create the (pending deposit: deposit
  * fragment) pair for subordinate hosts using the added domain information.
  *
- * <h1>Processing {@link DepositFragment}</h1>
+ * <h2>Processing {@link DepositFragment}</h2>
  *
  * The (pending deposit: deposit fragment) pairs from different resources are combined and grouped
  * by pending deposit. For each pending deposit, all the relevant deposit fragments are written into
@@ -466,13 +466,10 @@ public class RdePipeline implements Serializable {
                               // Contacts and hosts are only deposited in RDE, not BRDA.
                               if (pendingDeposit.mode() == RdeMode.FULL) {
                                 HashSet<Serializable> contacts = new HashSet<>();
-                                contacts.add(domain.getAdminContact().getKey());
-                                contacts.add(domain.getTechContact().getKey());
-                                contacts.add(domain.getRegistrant().getKey());
-                                // Billing contact is not mandatory.
-                                if (domain.getBillingContact() != null) {
-                                  contacts.add(domain.getBillingContact().getKey());
-                                }
+                                domain.getAdminContact().ifPresent(c -> contacts.add(c.getKey()));
+                                domain.getTechContact().ifPresent(c -> contacts.add(c.getKey()));
+                                domain.getRegistrant().ifPresent(c -> contacts.add(c.getKey()));
+                                domain.getBillingContact().ifPresent(c -> contacts.add(c.getKey()));
                                 referencedContactCounter.inc(contacts.size());
                                 contacts.forEach(
                                     contactRepoId ->
@@ -658,14 +655,8 @@ public class RdePipeline implements Serializable {
    */
   @SuppressWarnings("unchecked")
   static ImmutableSet<PendingDeposit> decodePendingDeposits(String encodedPendingDeposits) {
-    try (ObjectInputStream ois =
-        new ObjectInputStream(
-            new ByteArrayInputStream(
-                BaseEncoding.base64Url().omitPadding().decode(encodedPendingDeposits)))) {
-      return (ImmutableSet<PendingDeposit>) ois.readObject();
-    } catch (IOException | ClassNotFoundException e) {
-      throw new IllegalArgumentException("Unable to parse encoded pending deposit map.", e);
-    }
+    return ImmutableSet.copyOf(
+        safeDeserializeCollection(PendingDeposit.class, decodeBase64(encodedPendingDeposits)));
   }
 
   /**
@@ -674,12 +665,7 @@ public class RdePipeline implements Serializable {
    */
   public static String encodePendingDeposits(ImmutableSet<PendingDeposit> pendingDeposits)
       throws IOException {
-    try (ByteArrayOutputStream baos = new ByteArrayOutputStream()) {
-      ObjectOutputStream oos = new ObjectOutputStream(baos);
-      oos.writeObject(pendingDeposits);
-      oos.flush();
-      return BaseEncoding.base64Url().omitPadding().encode(baos.toByteArray());
-    }
+    return encodeBase64(serializeCollection(pendingDeposits));
   }
 
   public static void main(String[] args) throws IOException, ClassNotFoundException {
@@ -699,27 +685,26 @@ public class RdePipeline implements Serializable {
   protected abstract static class TupleTags {
 
     protected static final TupleTag<KV<PendingDeposit, DepositFragment>> DOMAIN_FRAGMENTS =
-        new TupleTag<KV<PendingDeposit, DepositFragment>>() {};
+        new TupleTag<>() {};
 
     protected static final TupleTag<KV<String, PendingDeposit>> REFERENCED_CONTACTS =
-        new TupleTag<KV<String, PendingDeposit>>() {};
+        new TupleTag<>() {};
 
     protected static final TupleTag<KV<String, PendingDeposit>> REFERENCED_HOSTS =
-        new TupleTag<KV<String, PendingDeposit>>() {};
+        new TupleTag<>() {};
 
     protected static final TupleTag<KV<String, KV<String, CoGbkResult>>> SUPERORDINATE_DOMAINS =
-        new TupleTag<KV<String, KV<String, CoGbkResult>>>() {};
+        new TupleTag<>() {};
 
     protected static final TupleTag<KV<PendingDeposit, DepositFragment>> EXTERNAL_HOST_FRAGMENTS =
-        new TupleTag<KV<PendingDeposit, DepositFragment>>() {};
+        new TupleTag<>() {};
 
-    protected static final TupleTag<PendingDeposit> PENDING_DEPOSIT =
-        new TupleTag<PendingDeposit>() {};
+    protected static final TupleTag<PendingDeposit> PENDING_DEPOSIT = new TupleTag<>() {};
 
     protected static final TupleTag<KV<String, CoGbkResult>> HOST_TO_PENDING_DEPOSIT =
-        new TupleTag<KV<String, CoGbkResult>>() {};
+        new TupleTag<>() {};
 
-    protected static final TupleTag<Long> REVISION_ID = new TupleTag<Long>() {};
+    protected static final TupleTag<Long> REVISION_ID = new TupleTag<>() {};
   }
 
   @Singleton

@@ -18,8 +18,8 @@ import static com.google.common.base.Preconditions.checkArgument;
 
 import google.registry.model.ImmutableObject;
 import google.registry.model.domain.Period;
+import jakarta.xml.bind.annotation.XmlTransient;
 import java.util.Optional;
-import javax.xml.bind.annotation.XmlTransient;
 import org.joda.money.CurrencyUnit;
 import org.joda.time.DateTime;
 
@@ -34,23 +34,41 @@ public abstract class FeeQueryCommandExtensionItem extends ImmutableObject {
 
   /** The name of a command that might have an associated fee. */
   public enum CommandName {
-    UNKNOWN,
-    CREATE,
-    RENEW,
-    TRANSFER,
-    RESTORE,
-    UPDATE;
+    UNKNOWN(false, false),
+    CREATE(false, true),
+    RENEW(true, true),
+    TRANSFER(true, true),
+    RESTORE(true, true),
+    UPDATE(false, true),
+    /**
+     * We don't accept CUSTOM commands in requests but may issue them in responses. A CUSTOM command
+     * name is permitted in general per RFC 8748 section 3.1.
+     */
+    CUSTOM(false, false);
+
+    private final boolean loadDomainForCheck;
+    private final boolean acceptableInputAction;
 
     public static CommandName parseKnownCommand(String string) {
       try {
         CommandName command = valueOf(string);
-        checkArgument(!command.equals(UNKNOWN));
+        checkArgument(
+            command.acceptableInputAction, "Command %s is not an acceptable input action", string);
         return command;
       } catch (IllegalArgumentException e) {
         throw new IllegalArgumentException(
             "Invalid EPP action name. Valid actions are CREATE, RENEW, TRANSFER, RESTORE, and"
                 + " UPDATE");
       }
+    }
+
+    CommandName(boolean loadDomainForCheck, boolean acceptableInputAction) {
+      this.loadDomainForCheck = loadDomainForCheck;
+      this.acceptableInputAction = acceptableInputAction;
+    }
+
+    public boolean shouldLoadDomainForCheck() {
+      return this.loadDomainForCheck;
     }
   }
 

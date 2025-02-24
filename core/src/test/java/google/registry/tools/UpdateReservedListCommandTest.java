@@ -15,7 +15,6 @@
 package google.registry.tools;
 
 import static com.google.common.truth.Truth.assertThat;
-import static com.google.common.truth.Truth8.assertThat;
 import static google.registry.model.tld.label.ReservationType.FULLY_BLOCKED;
 import static google.registry.testing.DatabaseHelper.persistReservedList;
 import static google.registry.testing.TestDataHelper.loadFile;
@@ -37,16 +36,15 @@ class UpdateReservedListCommandTest
 
   @BeforeEach
   void beforeEach() {
-    populateInitialReservedListInDatabase(true);
+    populateInitialReservedListInDatabase();
   }
 
-  private void populateInitialReservedListInDatabase(boolean shouldPublish) {
+  private void populateInitialReservedListInDatabase() {
     persistReservedList(
         new ReservedList.Builder()
             .setName("xn--q9jyb4c_common-reserved")
             .setReservedListMapFromLines(ImmutableList.of("helicopter,FULLY_BLOCKED"))
             .setCreationTimestamp(START_OF_TIME)
-            .setShouldPublish(shouldPublish)
             .build());
   }
 
@@ -60,23 +58,6 @@ class UpdateReservedListCommandTest
     runSuccessfulUpdateTest("--input=" + reservedTermsPath);
   }
 
-  @Test
-  void testSuccess_shouldPublish_setToFalseCorrectly() throws Exception {
-    runSuccessfulUpdateTest("--input=" + reservedTermsPath, "--should_publish=false");
-    assertThat(ReservedList.get("xn--q9jyb4c_common-reserved")).isPresent();
-    ReservedList reservedList = ReservedList.get("xn--q9jyb4c_common-reserved").get();
-    assertThat(reservedList.getShouldPublish()).isFalse();
-  }
-
-  @Test
-  void testSuccess_shouldPublish_doesntOverrideFalseIfNotSpecified() throws Exception {
-    populateInitialReservedListInDatabase(false);
-    runCommandForced("--input=" + reservedTermsPath);
-    assertThat(ReservedList.get("xn--q9jyb4c_common-reserved")).isPresent();
-    ReservedList reservedList = ReservedList.get("xn--q9jyb4c_common-reserved").get();
-    assertThat(reservedList.getShouldPublish()).isFalse();
-  }
-
   private void runSuccessfulUpdateTest(String... args) throws Exception {
     runCommandForced(args);
     assertThat(ReservedList.get("xn--q9jyb4c_common-reserved")).isPresent();
@@ -85,6 +66,10 @@ class UpdateReservedListCommandTest
     assertThat(reservedList.getReservationInList("baddies")).hasValue(FULLY_BLOCKED);
     assertThat(reservedList.getReservationInList("ford")).hasValue(FULLY_BLOCKED);
     assertThat(reservedList.getReservationInList("helicopter")).isEmpty();
+    assertInStdout("Update reserved list for xn--q9jyb4c_common-reserved?");
+    assertInStdout("helicopter: helicopter,FULLY_BLOCKED -> null");
+    assertInStdout("baddies: null -> baddies,FULLY_BLOCKED");
+    assertInStdout("ford: null -> ford,FULLY_BLOCKED # random comment");
   }
 
   @Test
@@ -130,8 +115,54 @@ class UpdateReservedListCommandTest
     command.init();
 
     assertThat(command.prompt()).contains("Update reserved list for xn--q9jyb4c_common-reserved?");
-    assertThat(command.prompt()).contains("Old list: [(helicopter,FULLY_BLOCKED)]");
-    assertThat(command.prompt())
-        .contains("New list: [(baddies,FULLY_BLOCKED), (ford,FULLY_BLOCKED # random comment)]");
+    assertThat(command.prompt()).contains("helicopter: helicopter,FULLY_BLOCKED -> null");
+    assertThat(command.prompt()).contains("baddies: null -> baddies,FULLY_BLOCKED");
+    assertThat(command.prompt()).contains("ford: null -> ford,FULLY_BLOCKED # random comment");
+  }
+
+  @Test
+  void testSuccess_dryRun() throws Exception {
+    runCommandForced("--input=" + reservedTermsPath, "--dry_run");
+    assertThat(command.prompt()).contains("Update reserved list for xn--q9jyb4c_common-reserved?");
+    assertThat(ReservedList.get("xn--q9jyb4c_common-reserved")).isPresent();
+    ReservedList reservedList = ReservedList.get("xn--q9jyb4c_common-reserved").get();
+    assertThat(reservedList.getReservedListEntries()).hasSize(1);
+    assertThat(reservedList.getReservationInList("helicopter")).hasValue(FULLY_BLOCKED);
+  }
+
+  @Test
+  void testFailure_runCommandOnProduction_noFlag() throws Exception {
+    IllegalArgumentException thrown =
+        assertThrows(
+            IllegalArgumentException.class,
+            () ->
+                runCommandInEnvironment(
+                    RegistryToolEnvironment.PRODUCTION,
+                    "--name=xn--q9jyb4c_common-reserved",
+                    "--input=" + reservedTermsPath));
+    assertThat(thrown.getMessage())
+        .isEqualTo(
+            "The --build_environment flag must be used when running update_reserved_list in"
+                + " production");
+  }
+
+  @Test
+  void testSuccess_runCommandOnProduction_buildEnvFlag() throws Exception {
+    runCommandInEnvironment(
+        RegistryToolEnvironment.PRODUCTION,
+        "--name=xn--q9jyb4c_common-reserved",
+        "--input=" + reservedTermsPath,
+        "--build_environment",
+        "-f");
+    assertThat(ReservedList.get("xn--q9jyb4c_common-reserved")).isPresent();
+    ReservedList reservedList = ReservedList.get("xn--q9jyb4c_common-reserved").get();
+    assertThat(reservedList.getReservedListEntries()).hasSize(2);
+    assertThat(reservedList.getReservationInList("baddies")).hasValue(FULLY_BLOCKED);
+    assertThat(reservedList.getReservationInList("ford")).hasValue(FULLY_BLOCKED);
+    assertThat(reservedList.getReservationInList("helicopter")).isEmpty();
+    assertInStdout("Update reserved list for xn--q9jyb4c_common-reserved?");
+    assertInStdout("helicopter: helicopter,FULLY_BLOCKED -> null");
+    assertInStdout("baddies: null -> baddies,FULLY_BLOCKED");
+    assertInStdout("ford: null -> ford,FULLY_BLOCKED # random comment");
   }
 }

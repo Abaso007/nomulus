@@ -30,6 +30,7 @@ import google.registry.persistence.transaction.JpaTransactionManager;
 import google.registry.persistence.transaction.TransactionManagerFactory;
 import google.registry.tools.AuthModule.LoginRequiredException;
 import google.registry.tools.params.ParameterFactory;
+import google.registry.util.RegistryEnvironment;
 import java.security.Security;
 import java.util.Map;
 import java.util.Optional;
@@ -43,7 +44,8 @@ final class RegistryCli implements CommandRunner {
   // The environment parameter is parsed twice: once here, and once with {@link
   // RegistryToolEnvironment#parseFromArgs} in the {@link RegistryTool#main} function.
   //
-  // The flag names must be in sync between the two, and also - this is ugly and we should feel bad.
+  // The flag names must be in sync between the two, and also - this is ugly, and we should feel
+  // bad.
   @Parameter(
       names = {"-e", "--environment"},
       description = "Sets the default environment to run the command.")
@@ -55,22 +57,27 @@ final class RegistryCli implements CommandRunner {
   private boolean showAllCommands;
 
   @Parameter(
-      names = {"--credential"},
+      names = "--credential",
       description =
           "Name of a JSON file containing credential information used by the tool. "
               + "If not set, credentials saved by running `nomulus login' will be used.")
   private String credentialJson = null;
 
   @Parameter(
-      names = {"--sql_access_info"},
+      names = "--sql_access_info",
       description =
           "Name of a file containing space-separated SQL access info used when deploying "
               + "Beam pipelines")
   private String sqlAccessInfoFile = null;
 
+  @Parameter(names = "--gae", description = "Whether to use GAE runtime, instead of GKE")
+  private boolean useGae = false;
+
+  @Parameter(names = "--canary", description = "Whether to connect to the canary instances")
+  private boolean useCanary = false;
+
   // Do not make this final - compile-time constant inlining may interfere with JCommander.
-  @ParametersDelegate
-  private LoggingParameters loggingParams = new LoggingParameters();
+  @ParametersDelegate private LoggingParameters loggingParams = new LoggingParameters();
 
   RegistryToolComponent component;
 
@@ -92,10 +99,10 @@ final class RegistryCli implements CommandRunner {
     Security.addProvider(new BouncyCastleProvider());
   }
 
-  // The <? extends Class<? extends Command>> wildcard looks a little funny, but is needed so that
-  // we can accept maps with value types that are subtypes of Class<? extends Command> rather than
-  // literally that type.  For more explanation, see:
-  //   http://www.angelikalanger.com/GenericsFAQ/FAQSections/TypeArguments.html#FAQ104
+  // The <? extends Class<? extends Command>> wildcard looks a little funny, but is necessary so
+  // that we can accept maps with value types that are subtypes of Class<? extends Command> rather
+  // than literally that type.  For more explanation, see:
+  // http://www.angelikalanger.com/GenericsFAQ/FAQSections/TypeArguments.html#FAQ104
   @Override
   public void run(String[] args) throws Exception {
 
@@ -104,9 +111,9 @@ final class RegistryCli implements CommandRunner {
     jcommander.addConverterFactory(new ParameterFactory());
     jcommander.setProgramName(programName);
 
-    // Create all command instances. It would be preferrable to do this in the constructor, but
-    // JCommander mutates the command instances and doesn't reset them so we have to do it for every
-    // run.
+    // Create all command instances. It would be preferable to do this in the constructor, but
+    // JCommander mutates the command instances and doesn't reset them, so we have to do it for
+    // every run.
     try {
       for (Map.Entry<String, ? extends Class<? extends Command>> entry : commands.entrySet()) {
         Command command = entry.getValue().getDeclaredConstructor().newInstance();
@@ -142,6 +149,7 @@ final class RegistryCli implements CommandRunner {
       }
       throw e;
     }
+
     String parsedCommand = jcommander.getParsedCommand();
     // Show the list of all commands either if requested or if no subcommand name was specified
     // (which does not throw a ParameterException parse error above).
@@ -161,6 +169,8 @@ final class RegistryCli implements CommandRunner {
         DaggerRegistryToolComponent.builder()
             .credentialFilePath(credentialJson)
             .sqlAccessInfoFile(sqlAccessInfoFile)
+            .useGke(!useGae)
+            .useCanary(useCanary)
             .build();
 
     // JCommander stores sub-commands as nested JCommander objects containing a list of user objects
@@ -169,7 +179,7 @@ final class RegistryCli implements CommandRunner {
     Command command =
         (Command)
             Iterables.getOnlyElement(jcommander.getCommands().get(parsedCommand).getObjects());
-    loggingParams.configureLogging();  // Must be called after parameters are parsed.
+    loggingParams.configureLogging(); // Must be called after parameters are parsed.
 
     try {
       runCommand(command);
@@ -190,9 +200,10 @@ final class RegistryCli implements CommandRunner {
           e.printStackTrace();
           System.err.println("===================================================================");
           System.err.println(
-              "This error is likely the result of having another instance of\n"
-                  + "nomulus running at the same time.  Check your system, shut down\n"
-                  + "the other instance, and try again.");
+              """
+              This error is likely the result of having another instance of
+              nomulus running at the same time.  Check your system, shut down
+              the other instance, and try again.""");
           System.err.println("===================================================================");
         } else {
           throw e;
@@ -202,7 +213,7 @@ final class RegistryCli implements CommandRunner {
   }
 
   private ServiceConnection getConnection() {
-    // Get the App Engine connection, advise the user if they are not currently logged in..
+    // Get the App Engine connection, advise the user if they are not currently logged in.
     if (connection == null) {
       connection = component.serviceConnection();
     }
@@ -218,12 +229,19 @@ final class RegistryCli implements CommandRunner {
 
     // Reset the JPA transaction manager after every command to avoid a situation where a test can
     // interfere with other tests
-    JpaTransactionManager cachedJpaTm = tm();
+    final JpaTransactionManager cachedJpaTm;
+    if (RegistryEnvironment.get() == RegistryEnvironment.UNITTEST) {
+      cachedJpaTm = tm();
+    } else {
+      cachedJpaTm = null;
+    }
     TransactionManagerFactory.setJpaTm(() -> component.nomulusToolJpaTransactionManager().get());
     TransactionManagerFactory.setReplicaJpaTm(
         () -> component.nomulusToolReplicaJpaTransactionManager().get());
     command.run();
-    TransactionManagerFactory.setJpaTm(() -> cachedJpaTm);
+    if (RegistryEnvironment.get() == RegistryEnvironment.UNITTEST) {
+      TransactionManagerFactory.setJpaTm(() -> cachedJpaTm);
+    }
   }
 
   void setEnvironment(RegistryToolEnvironment environment) {

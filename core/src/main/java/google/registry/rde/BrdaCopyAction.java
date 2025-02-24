@@ -32,6 +32,7 @@ import google.registry.model.rde.RdeNamingUtils;
 import google.registry.model.rde.RdeRevision;
 import google.registry.model.tld.Tld;
 import google.registry.request.Action;
+import google.registry.request.Action.GaeService;
 import google.registry.request.HttpException.NoContentException;
 import google.registry.request.Parameter;
 import google.registry.request.RequestParameters;
@@ -62,11 +63,11 @@ import org.joda.time.DateTime;
  *     Agreement</a>
  */
 @Action(
-    service = Action.Service.BACKEND,
+    service = GaeService.BACKEND,
     path = BrdaCopyAction.PATH,
     method = POST,
     automaticallyPrintOk = true,
-    auth = Auth.AUTH_API_ADMIN)
+    auth = Auth.AUTH_ADMIN)
 public final class BrdaCopyAction implements Runnable {
 
   public static final String PATH = "/_dr/task/brdaCopy";

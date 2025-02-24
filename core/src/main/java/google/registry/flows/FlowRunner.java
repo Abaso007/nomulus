@@ -14,13 +14,12 @@
 
 package google.registry.flows;
 
-import static google.registry.persistence.transaction.TransactionManagerFactory.tm;
 import static google.registry.xml.XmlTransformer.prettyPrint;
 
-import com.google.common.base.Strings;
 import com.google.common.flogger.FluentLogger;
 import google.registry.flows.FlowModule.DryRun;
 import google.registry.flows.FlowModule.InputXml;
+import google.registry.flows.FlowModule.LogSqlStatements;
 import google.registry.flows.FlowModule.RegistrarId;
 import google.registry.flows.FlowModule.Superuser;
 import google.registry.flows.FlowModule.Transactional;
@@ -29,6 +28,7 @@ import google.registry.model.eppcommon.Trid;
 import google.registry.model.eppoutput.EppOutput;
 import google.registry.monitoring.whitebox.EppMetric;
 import google.registry.persistence.PersistenceModule.TransactionIsolationLevel;
+import google.registry.persistence.transaction.JpaTransactionManager;
 import java.util.Optional;
 import javax.inject.Inject;
 import javax.inject.Provider;
@@ -36,7 +36,7 @@ import javax.inject.Provider;
 /** Run a flow, either transactionally or not, with logging and retrying as needed. */
 public class FlowRunner {
 
-  private static final String COMMAND_LOG_FORMAT = "EPP Command" + Strings.repeat("\n\t%s", 8);
+  private static final String COMMAND_LOG_FORMAT = "EPP Command" + "\n\t%s".repeat(8);
 
   private static final FluentLogger logger = FluentLogger.forEnclosingClass();
 
@@ -50,9 +50,12 @@ public class FlowRunner {
   @Inject @DryRun boolean isDryRun;
   @Inject @Superuser boolean isSuperuser;
   @Inject @Transactional boolean isTransactional;
+  @Inject @LogSqlStatements boolean logSqlStatements;
   @Inject SessionMetadata sessionMetadata;
   @Inject Trid trid;
   @Inject FlowReporter flowReporter;
+  @Inject JpaTransactionManager jpaTransactionManager;
+
   @Inject FlowRunner() {}
 
   /** Runs the EPP flow, and records metrics on the given builder. */
@@ -74,30 +77,30 @@ public class FlowRunner {
       flowReporter.recordToLogs();
     }
     eppMetricBuilder.setCommandNameFromFlow(flowClass.getSimpleName());
-    if (!isTransactional) {
+    // We may already be in a transaction, e.g., when invoked by DeleteExpiredDomainsAction.
+    if (!isTransactional || jpaTransactionManager.inTransaction()) {
       return EppOutput.create(flowProvider.get().run());
     }
     try {
-      // TODO(mcilwain/weiminyu): Use transactReadOnly() here for TransactionalFlow and transact()
-      //                          for MutatingFlow.
-      return tm().transact(
-              () -> {
-                try {
-                  EppOutput output = EppOutput.create(flowProvider.get().run());
-                  if (isDryRun) {
-                    throw new DryRunException(output);
-                  }
-                  if (flowClass.equals(LoginFlow.class)) {
-                    // In LoginFlow, registrarId isn't known until after the flow executes, so save
-                    // it then.
-                    eppMetricBuilder.setRegistrarId(sessionMetadata.getRegistrarId());
-                  }
-                  return output;
-                } catch (EppException e) {
-                  throw new EppRuntimeException(e);
-                }
-              },
-              isolationLevelOverride.orElse(null));
+      return jpaTransactionManager.transact(
+          isolationLevelOverride.orElse(null),
+          () -> {
+            try {
+              EppOutput output = EppOutput.create(flowProvider.get().run());
+              if (isDryRun) {
+                throw new DryRunException(output);
+              }
+              if (flowClass.equals(LoginFlow.class)) {
+                // In LoginFlow, registrarId isn't known until after the flow executes, so save
+                // it then.
+                eppMetricBuilder.setRegistrarId(sessionMetadata.getRegistrarId());
+              }
+              return output;
+            } catch (EppException e) {
+              throw new EppRuntimeException(e);
+            }
+          },
+          logSqlStatements);
     } catch (DryRunException e) {
       return e.output;
     } catch (EppRuntimeException e) {

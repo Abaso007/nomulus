@@ -37,13 +37,17 @@ class DockerWebDriverExtension implements BeforeAllCallback, AfterAllCallback {
   // This port number is defined in this Dockerfile:
   // https://github.com/SeleniumHQ/docker-selenium/blob/master/StandaloneChrome/Dockerfile#L21
   private static final int CHROME_DRIVER_SERVICE_PORT = 4444;
-  private static final URL WEB_DRIVER_URL = getWebDriverUrl();
+  // The selenium image only supports amd64 architecture. We disable the call to getWebDriverUrl()
+  // here as the extension is instantiated in the test class before the test runner had a chance to
+  // disable the tests.
+  private static final URL WEB_DRIVER_URL =
+      System.getProperty("os.arch").equals("amd64") ? getWebDriverUrl() : null;
   private WebDriver webDriver;
 
   private static URL getWebDriverUrl() {
     // TODO(#209): Find a way to automatically detect the version of docker image
     GenericContainer container =
-        new GenericContainer("selenium/standalone-chrome:3.141.59-mercury")
+        new GenericContainer("selenium/standalone-chrome:4.25")
             .withFileSystemBind("/dev/shm", "/dev/shm", BindMode.READ_WRITE)
             .withExposedPorts(CHROME_DRIVER_SERVICE_PORT)
             .waitingFor(Wait.forHttp("/").withStartupTimeout(Duration.of(20, ChronoUnit.SECONDS)));
@@ -53,7 +57,7 @@ class DockerWebDriverExtension implements BeforeAllCallback, AfterAllCallback {
       url =
           new URL(
               String.format(
-                  "http://%s:%d/wd/hub",
+                  "http://%s:%d",
                   container.getContainerIpAddress(),
                   container.getMappedPort(CHROME_DRIVER_SERVICE_PORT)));
     } catch (MalformedURLException e) {
@@ -65,7 +69,7 @@ class DockerWebDriverExtension implements BeforeAllCallback, AfterAllCallback {
 
   @Override
   public void beforeAll(ExtensionContext context) {
-    ChromeOptions chromeOptions = new ChromeOptions().setHeadless(true);
+    ChromeOptions chromeOptions = new ChromeOptions().addArguments("--headless=new");
     webDriver = new RemoteWebDriver(WEB_DRIVER_URL, chromeOptions);
   }
 

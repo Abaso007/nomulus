@@ -25,11 +25,11 @@ import google.registry.model.domain.rgp.GracePeriodStatus;
 import google.registry.model.reporting.HistoryEntry.HistoryEntryId;
 import google.registry.persistence.VKey;
 import google.registry.persistence.WithVKey;
-import javax.persistence.AttributeOverride;
-import javax.persistence.Column;
-import javax.persistence.Entity;
-import javax.persistence.Index;
-import javax.persistence.Table;
+import jakarta.persistence.AttributeOverride;
+import jakarta.persistence.Column;
+import jakarta.persistence.Entity;
+import jakarta.persistence.Index;
+import jakarta.persistence.Table;
 import org.joda.time.DateTime;
 
 /**
@@ -45,10 +45,11 @@ import org.joda.time.DateTime;
       @Index(columnList = "eventTime"),
       @Index(columnList = "domainRepoId"),
       @Index(columnList = "billingTime"),
-      @Index(columnList = "billing_event_id"),
-      @Index(columnList = "billing_recurrence_id")
+      @Index(columnList = "billingEventId"),
+      @Index(columnList = "billingRecurrenceId"),
+      @Index(columnList = "domainRepoId,domainHistoryRevisionId")
     })
-@AttributeOverride(name = "id", column = @Column(name = "billing_cancellation_id"))
+@AttributeOverride(name = "id", column = @Column(name = "billingCancellationId"))
 @WithVKey(Long.class)
 public class BillingCancellation extends BillingBase {
 

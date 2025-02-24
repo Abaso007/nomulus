@@ -53,8 +53,8 @@ import google.registry.flows.custom.DomainRenewFlowCustomLogic.BeforeResponseRet
 import google.registry.flows.custom.DomainRenewFlowCustomLogic.BeforeSaveParameters;
 import google.registry.flows.custom.EntityChanges;
 import google.registry.flows.domain.token.AllocationTokenFlowUtils;
-import google.registry.flows.domain.token.AllocationTokenFlowUtils.MissingRemoveDomainTokenOnBulkPricingDomainException;
-import google.registry.flows.domain.token.AllocationTokenFlowUtils.RemoveDomainTokenOnNonBulkPricingDomainException;
+import google.registry.flows.domain.token.AllocationTokenFlowUtils.MissingRemoveBulkPricingTokenOnBulkPricingDomainException;
+import google.registry.flows.domain.token.AllocationTokenFlowUtils.RemoveBulkPricingTokenOnNonBulkPricingDomainException;
 import google.registry.model.ImmutableObject;
 import google.registry.model.billing.BillingBase.Reason;
 import google.registry.model.billing.BillingEvent;
@@ -73,7 +73,6 @@ import google.registry.model.domain.fee.FeeTransformResponseExtension;
 import google.registry.model.domain.metadata.MetadataExtension;
 import google.registry.model.domain.rgp.GracePeriodStatus;
 import google.registry.model.domain.token.AllocationToken;
-import google.registry.model.domain.token.AllocationToken.TokenType;
 import google.registry.model.domain.token.AllocationTokenExtension;
 import google.registry.model.eppcommon.AuthInfo;
 import google.registry.model.eppcommon.StatusValue;
@@ -121,8 +120,8 @@ import org.joda.time.Duration;
  * @error {@link DomainFlowUtils.RegistrarMustBeActiveForThisOperationException}
  * @error {@link DomainFlowUtils.UnsupportedFeeAttributeException}
  * @error {@link DomainRenewFlow.IncorrectCurrentExpirationDateException}
- * @error {@link MissingRemoveDomainTokenOnBulkPricingDomainException}
- * @error {@link RemoveDomainTokenOnNonBulkPricingDomainException}
+ * @error {@link MissingRemoveBulkPricingTokenOnBulkPricingDomainException}
+ * @error {@link RemoveBulkPricingTokenOnNonBulkPricingDomainException}
  * @error {@link
  *     google.registry.flows.domain.token.AllocationTokenFlowUtils.AllocationTokenNotValidForDomainException}
  * @error {@link
@@ -183,7 +182,7 @@ public final class DomainRenewFlow implements MutatingFlow {
             CommandName.RENEW,
             eppInput.getSingleExtension(AllocationTokenExtension.class));
     boolean defaultTokenUsed = false;
-    if (!allocationToken.isPresent()) {
+    if (allocationToken.isEmpty()) {
       allocationToken =
           DomainFlowUtils.checkForDefaultToken(
               tld, existingDomain.getDomainName(), CommandName.RENEW, registrarId, now);
@@ -258,8 +257,7 @@ public final class DomainRenewFlow implements MutatingFlow {
     ImmutableSet.Builder<ImmutableObject> entitiesToSave = new ImmutableSet.Builder<>();
     entitiesToSave.add(
         newDomain, domainHistory, explicitRenewEvent, newAutorenewEvent, newAutorenewPollMessage);
-    if (allocationToken.isPresent()
-        && TokenType.SINGLE_USE.equals(allocationToken.get().getTokenType())) {
+    if (allocationToken.isPresent() && allocationToken.get().getTokenType().isOneTimeUse()) {
       entitiesToSave.add(
           allocationTokenFlowUtils.redeemToken(
               allocationToken.get(), domainHistory.getHistoryEntryId()));
@@ -328,7 +326,7 @@ public final class DomainRenewFlow implements MutatingFlow {
       checkHasBillingAccount(registrarId, existingDomain.getTld());
     }
     verifyUnitIsYears(command.getPeriod());
-    // We only allow __REMOVEDOMAIN__ token on bulk pricing domains for now
+    // We only allow __REMOVE_BULK_PRICING__ token on bulk pricing domains for now
     verifyTokenAllowedOnDomain(existingDomain, allocationToken);
     // If the date they specify doesn't match the expiration, fail. (This is an idempotence check).
     if (!command.getCurrentExpirationDate().equals(

@@ -15,7 +15,7 @@
 package google.registry.model.domain;
 
 import static com.google.common.base.Preconditions.checkArgument;
-import static google.registry.model.IdService.allocateId;
+import static google.registry.persistence.transaction.TransactionManagerFactory.tm;
 import static google.registry.util.PreconditionsUtils.checkArgumentNotNull;
 
 import com.google.common.annotations.VisibleForTesting;
@@ -24,13 +24,13 @@ import google.registry.model.billing.BillingRecurrence;
 import google.registry.model.domain.rgp.GracePeriodStatus;
 import google.registry.model.reporting.HistoryEntry.HistoryEntryId;
 import google.registry.persistence.VKey;
+import jakarta.persistence.Access;
+import jakarta.persistence.AccessType;
+import jakarta.persistence.Entity;
+import jakarta.persistence.Id;
+import jakarta.persistence.Index;
+import jakarta.persistence.Table;
 import javax.annotation.Nullable;
-import javax.persistence.Access;
-import javax.persistence.AccessType;
-import javax.persistence.Entity;
-import javax.persistence.Id;
-import javax.persistence.Index;
-import javax.persistence.Table;
 import org.joda.time.DateTime;
 
 /**
@@ -70,7 +70,8 @@ public class GracePeriod extends GracePeriodBase {
         (billingRecurrence != null) == GracePeriodStatus.AUTO_RENEW.equals(type),
         "BillingRecurrences must be present on (and only on) autorenew grace periods");
     GracePeriod instance = new GracePeriod();
-    instance.gracePeriodId = gracePeriodId == null ? allocateId() : gracePeriodId;
+    instance.gracePeriodId =
+        gracePeriodId == null ? tm().reTransact(tm()::allocateId) : gracePeriodId;
     instance.type = checkArgumentNotNull(type);
     instance.domainRepoId = checkArgumentNotNull(domainRepoId);
     instance.expirationTime = checkArgumentNotNull(expirationTime);
@@ -179,7 +180,11 @@ public class GracePeriod extends GracePeriodBase {
 
   /** Entity class to represent a historic {@link GracePeriod}. */
   @Entity(name = "GracePeriodHistory")
-  @Table(indexes = @Index(columnList = "domainRepoId"))
+  @Table(
+      indexes = {
+        @Index(columnList = "domainRepoId"),
+        @Index(columnList = "domainRepoId,domainHistoryRevisionId")
+      })
   public static class GracePeriodHistory extends GracePeriodBase {
     @Id Long gracePeriodHistoryRevisionId;
 
@@ -198,7 +203,7 @@ public class GracePeriod extends GracePeriodBase {
 
     static GracePeriodHistory createFrom(long historyRevisionId, GracePeriod gracePeriod) {
       GracePeriodHistory instance = new GracePeriodHistory();
-      instance.gracePeriodHistoryRevisionId = allocateId();
+      instance.gracePeriodHistoryRevisionId = tm().reTransact(tm()::allocateId);
       instance.domainHistoryRevisionId = historyRevisionId;
       instance.gracePeriodId = gracePeriod.gracePeriodId;
       instance.type = gracePeriod.type;

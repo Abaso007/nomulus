@@ -1,4 +1,4 @@
-// Copyright 2023 The Nomulus Authors. All Rights Reserved.
+// Copyright 2024 The Nomulus Authors. All Rights Reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,17 +14,24 @@
 
 import { TestBed } from '@angular/core/testing';
 
-import { RegistrarService } from './registrar.service';
+import { provideHttpClient } from '@angular/common/http';
+import { provideHttpClientTesting } from '@angular/common/http/testing';
+import { MatSnackBar } from '@angular/material/snack-bar';
 import { BackendService } from '../shared/services/backend.service';
-import { HttpClientTestingModule } from '@angular/common/http/testing';
+import { RegistrarService } from './registrar.service';
 
 describe('RegistrarService', () => {
   let service: RegistrarService;
 
   beforeEach(() => {
     TestBed.configureTestingModule({
-      imports: [HttpClientTestingModule],
-      providers: [BackendService],
+      imports: [],
+      providers: [
+        BackendService,
+        MatSnackBar,
+        provideHttpClient(),
+        provideHttpClientTesting(),
+      ],
     });
     service = TestBed.inject(RegistrarService);
   });

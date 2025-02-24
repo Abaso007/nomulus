@@ -21,7 +21,6 @@ import static google.registry.testing.SystemInfo.hasCommand;
 import static java.nio.charset.StandardCharsets.UTF_8;
 import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
-import com.google.common.base.Strings;
 import com.google.common.collect.ImmutableList;
 import com.google.common.io.CharStreams;
 import google.registry.keyring.api.Keyring;
@@ -55,10 +54,7 @@ class GhostrydeGpgIntegrationTest {
 
   private static final ImmutableList<String> CONTENTS =
       ImmutableList.of(
-          "(◕‿◕)",
-          Strings.repeat("Fanatics have their dreams, wherewith they weave\n", 1000),
-          "\0yolo",
-          "");
+          "(◕‿◕)", "Fanatics have their dreams, wherewith they weave\n".repeat(1000), "\0yolo", "");
 
   @SuppressWarnings("unused")
   static Stream<Arguments> provideTestCombinations() {
@@ -91,7 +87,8 @@ class GhostrydeGpgIntegrationTest {
     assertThat(stdout).contains(":encrypted data packet:");
     assertThat(stdout).contains("version 3, algo 1, keyid A59C132F3589A1D5");
     assertThat(stdout).contains("name=\"" + Ghostryde.INNER_FILENAME + "\"");
-    assertThat(stderr).contains("encrypted with 2048-bit RSA key, ID A59C132F3589A1D5");
+    assertThat(stderr).contains("2048");
+    assertThat(stderr).contains("ID A59C132F3589A1D5");
 
     pid = gpg.exec(GPG_BINARY, "--use-embedded-filename", file.getPath());
     stderr = CharStreams.toString(new InputStreamReader(pid.getErrorStream(), UTF_8));

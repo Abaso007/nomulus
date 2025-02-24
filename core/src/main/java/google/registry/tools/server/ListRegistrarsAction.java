@@ -22,15 +22,16 @@ import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.ImmutableSet;
 import google.registry.model.registrar.Registrar;
 import google.registry.request.Action;
+import google.registry.request.Action.GaeService;
 import google.registry.request.auth.Auth;
 import javax.inject.Inject;
 
 /** An action that lists registrars, for use by the {@code nomulus list_registrars} command. */
 @Action(
-    service = Action.Service.TOOLS,
+    service = GaeService.TOOLS,
     path = ListRegistrarsAction.PATH,
     method = {GET, POST},
-    auth = Auth.AUTH_API_ADMIN)
+    auth = Auth.AUTH_ADMIN)
 public final class ListRegistrarsAction extends ListObjectsAction<Registrar> {
 
   public static final String PATH = "/_dr/admin/list/registrars";

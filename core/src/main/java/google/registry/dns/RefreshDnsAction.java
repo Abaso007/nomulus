@@ -26,6 +26,7 @@ import google.registry.model.annotations.ExternalMessagingName;
 import google.registry.model.domain.Domain;
 import google.registry.model.host.Host;
 import google.registry.request.Action;
+import google.registry.request.Action.GaeService;
 import google.registry.request.HttpException.BadRequestException;
 import google.registry.request.HttpException.NotFoundException;
 import google.registry.request.Parameter;
@@ -35,10 +36,10 @@ import javax.inject.Inject;
 
 /** Action that manually triggers refresh of DNS information. */
 @Action(
-    service = Action.Service.BACKEND,
-    path = "/_dr/dnsRefresh",
+    service = GaeService.BACKEND,
+    path = "/_dr/task/dnsRefresh",
     automaticallyPrintOk = true,
-    auth = Auth.AUTH_API_ADMIN)
+    auth = Auth.AUTH_ADMIN)
 public final class RefreshDnsAction implements Runnable {
 
   private final Clock clock;
@@ -63,16 +64,15 @@ public final class RefreshDnsAction implements Runnable {
     tm().transact(
             () -> {
               switch (type) {
-                case DOMAIN:
+                case DOMAIN -> {
                   loadAndVerifyExistence(Domain.class, domainOrHostName);
                   requestDomainDnsRefresh(domainOrHostName);
-                  break;
-                case HOST:
+                }
+                case HOST -> {
                   verifyHostIsSubordinate(loadAndVerifyExistence(Host.class, domainOrHostName));
                   requestHostDnsRefresh(domainOrHostName);
-                  break;
-                default:
-                  throw new BadRequestException("Unsupported type: " + type);
+                }
+                default -> throw new BadRequestException("Unsupported type: " + type);
               }
             });
   }

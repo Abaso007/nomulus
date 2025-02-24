@@ -19,7 +19,9 @@ import static com.google.common.collect.ImmutableList.toImmutableList;
 import static com.google.common.collect.Iterables.getLast;
 import static google.registry.dns.DnsUtils.requestDomainDnsRefresh;
 import static google.registry.model.tld.Tlds.assertTldsExist;
+import static google.registry.persistence.PersistenceModule.TransactionIsolationLevel.TRANSACTION_REPEATABLE_READ;
 import static google.registry.persistence.transaction.TransactionManagerFactory.tm;
+import static google.registry.request.RequestParameters.PARAM_BATCH_SIZE;
 import static google.registry.request.RequestParameters.PARAM_TLDS;
 import static google.registry.util.DateTimeUtils.END_OF_TIME;
 
@@ -27,16 +29,18 @@ import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableSet;
 import com.google.common.flogger.FluentLogger;
 import google.registry.request.Action;
+import google.registry.request.Action.GaeService;
 import google.registry.request.Parameter;
 import google.registry.request.Response;
 import google.registry.request.auth.Auth;
+import jakarta.persistence.TypedQuery;
 import java.util.Optional;
 import java.util.Random;
 import javax.annotation.Nullable;
 import javax.inject.Inject;
-import javax.persistence.TypedQuery;
 import org.apache.arrow.util.VisibleForTesting;
 import org.apache.http.HttpStatus;
+import org.joda.time.DateTime;
 import org.joda.time.Duration;
 
 /**
@@ -48,33 +52,55 @@ import org.joda.time.Duration;
  *
  * <p>You may pass in a {@code batchSize} for the batched read of domains from the database. This is
  * recommended to be somewhere between 200 and 500. The default value is 250.
+ *
+ * <p>If {@code activeOrDeletedSince} is passed in the request, this action will enqueue DNS publish
+ * tasks on all domains with a deletion time equal or greater than the value provided, including
+ * domains that have since been deleted.
  */
 @Action(
-    service = Action.Service.TOOLS,
+    service = GaeService.TOOLS,
     path = "/_dr/task/refreshDnsForAllDomains",
-    auth = Auth.AUTH_API_ADMIN)
+    auth = Auth.AUTH_ADMIN)
 public class RefreshDnsForAllDomainsAction implements Runnable {
 
   private static final FluentLogger logger = FluentLogger.forEnclosingClass();
 
+  /** The number of DNS updates to enqueue per transaction. */
   private static final int DEFAULT_BATCH_SIZE = 250;
+
+  /**
+   * The default number of DNS updates it is safe to execute per minute.
+   *
+   * <p>This is mostly a guess based on existing system performance, but the point is to be on the
+   * safe side and not cause contention with ongoing DNS updates from clients.
+   */
+  private static final int DEFAULT_REFRESH_QPS = 7;
 
   private final Response response;
   private final ImmutableSet<String> tlds;
 
   // Recommended value for batch size is between 200 and 500
   private final int batchSize;
+
+  private final int refreshQps;
+
   private final Random random;
+
+  private final DateTime activeOrDeletedSince;
 
   @Inject
   RefreshDnsForAllDomainsAction(
       Response response,
       @Parameter(PARAM_TLDS) ImmutableSet<String> tlds,
-      @Parameter("batchSize") Optional<Integer> batchSize,
+      @Parameter(PARAM_BATCH_SIZE) Optional<Integer> batchSize,
+      @Parameter("refreshQps") Optional<Integer> refreshQps,
+      @Parameter("activeOrDeletedSince") Optional<DateTime> activeOrDeletedSince,
       Random random) {
     this.response = response;
     this.tlds = tlds;
     this.batchSize = batchSize.orElse(DEFAULT_BATCH_SIZE);
+    this.refreshQps = refreshQps.orElse(DEFAULT_REFRESH_QPS);
+    this.activeOrDeletedSince = activeOrDeletedSince.orElse(END_OF_TIME);
     this.random = random;
   }
 
@@ -82,52 +108,60 @@ public class RefreshDnsForAllDomainsAction implements Runnable {
   public void run() {
     assertTldsExist(tlds);
     checkArgument(batchSize > 0, "Must specify a positive number for batch size");
-    int smearMinutes = tm().transact(this::calculateSmearMinutes);
+    logger.atInfo().log("Enqueueing DNS refresh tasks for TLDs %s.", tlds);
+    Duration smear = tm().transact(TRANSACTION_REPEATABLE_READ, this::calculateSmear);
 
     ImmutableList<String> domainsBatch;
     @Nullable String lastInPreviousBatch = null;
     do {
       Optional<String> lastInPreviousBatchOpt = Optional.ofNullable(lastInPreviousBatch);
-      domainsBatch = tm().transact(() -> refreshBatch(lastInPreviousBatchOpt, smearMinutes));
+      domainsBatch =
+          tm().transact(
+                  TRANSACTION_REPEATABLE_READ, () -> refreshBatch(lastInPreviousBatchOpt, smear));
       lastInPreviousBatch = domainsBatch.isEmpty() ? null : getLast(domainsBatch);
     } while (domainsBatch.size() == batchSize);
+    logger.atInfo().log("Finished enqueueing DNS refresh tasks.");
   }
 
   /**
-   * Calculates the number of smear minutes to enqueue refreshes so that the DNS queue does not get
+   * Calculates the smear duration to enqueue refreshes so that the DNS queue does not get
    * overloaded.
    */
-  private int calculateSmearMinutes() {
+  private Duration calculateSmear() {
     Long activeDomains =
         tm().query(
-                "SELECT COUNT(*) FROM Domain WHERE tld IN (:tlds) AND deletionTime = :endOfTime",
+                "SELECT COUNT(*) FROM Domain WHERE tld IN (:tlds) AND deletionTime >="
+                    + " :activeOrDeletedSince",
                 Long.class)
             .setParameter("tlds", tlds)
-            .setParameter("endOfTime", END_OF_TIME)
+            .setParameter("activeOrDeletedSince", activeOrDeletedSince)
             .getSingleResult();
-    return Math.max(activeDomains.intValue() / 1000, 1);
+    Duration smear = Duration.standardSeconds(Math.max(activeDomains / refreshQps, 1));
+    logger.atInfo().log("Smearing %d domain DNS refresh tasks across %s.", activeDomains, smear);
+    return smear;
   }
 
   private ImmutableList<String> getBatch(Optional<String> lastInPreviousBatch) {
     String sql =
         String.format(
             "SELECT domainName FROM Domain WHERE tld IN (:tlds) AND"
-                + " deletionTime = :endOfTime %s ORDER BY domainName ASC",
+                + " deletionTime >= :activeOrDeletedSince %s ORDER BY domainName ASC",
             lastInPreviousBatch.isPresent() ? "AND domainName > :lastInPreviousBatch" : "");
     TypedQuery<String> query =
         tm().query(sql, String.class)
             .setParameter("tlds", tlds)
-            .setParameter("endOfTime", END_OF_TIME);
+            .setParameter("activeOrDeletedSince", activeOrDeletedSince);
     lastInPreviousBatch.ifPresent(l -> query.setParameter("lastInPreviousBatch", l));
     return query.setMaxResults(batchSize).getResultStream().collect(toImmutableList());
   }
 
   @VisibleForTesting
-  ImmutableList<String> refreshBatch(Optional<String> lastInPreviousBatch, int smearMinutes) {
+  ImmutableList<String> refreshBatch(Optional<String> lastInPreviousBatch, Duration smear) {
     ImmutableList<String> domainBatch = getBatch(lastInPreviousBatch);
     try {
-      // Smear the task execution time over the next N minutes.
-      requestDomainDnsRefresh(domainBatch, Duration.standardMinutes(random.nextInt(smearMinutes)));
+      // Smear the task execution time over the next N seconds.
+      requestDomainDnsRefresh(
+          domainBatch, Duration.standardSeconds(random.nextInt((int) smear.getStandardSeconds())));
     } catch (Throwable t) {
       logger.atSevere().withCause(t).log("Error while enqueuing DNS refresh batch");
       response.setStatus(HttpStatus.SC_OK);

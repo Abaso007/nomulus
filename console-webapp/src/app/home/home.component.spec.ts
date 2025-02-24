@@ -1,4 +1,4 @@
-// Copyright 2022 The Nomulus Authors. All Rights Reserved.
+// Copyright 2024 The Nomulus Authors. All Rights Reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -16,6 +16,7 @@ import { ComponentFixture, TestBed } from '@angular/core/testing';
 
 import { HomeComponent } from './home.component';
 import { MaterialModule } from '../material.module';
+import { AppModule } from '../app.module';
 
 describe('HomeComponent', () => {
   let component: HomeComponent;
@@ -23,7 +24,7 @@ describe('HomeComponent', () => {
 
   beforeEach(async () => {
     await TestBed.configureTestingModule({
-      imports: [MaterialModule],
+      imports: [MaterialModule, AppModule],
       declarations: [HomeComponent],
     }).compileComponents();
 

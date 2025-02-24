@@ -18,19 +18,17 @@ task buildProxyImage(dependsOn: deployJar, type: Exec) {
   commandLine 'docker', 'build', '-t', 'proxy', '.'
 }
 
-task deployProxy(dependsOn: buildProxyImage) {
+task tagProxyImage(dependsOn: buildProxyImage, type: Exec) {
+  commandLine 'docker', 'tag', 'proxy', "gcr.io/${rootProject.gcpProject}/proxy"
+}
+
+task pushProxyImage(dependsOn: tagProxyImage, type: Exec) {
   configure verifyDeploymentConfig
-  doLast {
-    exec {
-      commandLine 'docker', 'tag', 'proxy', "gcr.io/${rootProject.gcpProject}/proxy"
-    }
-    exec {
-      commandLine 'docker', 'push', "gcr.io/${rootProject.gcpProject}/proxy"
-    }
-    exec {
-      commandLine './deploy-proxy-for-env.sh', "${rootProject.environment}"
-    }
-  }
+  commandLine 'docker', 'push', "gcr.io/${rootProject.gcpProject}/proxy"
+}
+
+task deployProxy(dependsOn: pushProxyImage, type: Exec) {
+  commandLine './deploy-proxy-for-env.sh', "${rootProject.environment}"
 }
 
 project.build.dependsOn buildProxyImage
@@ -38,7 +36,6 @@ project.build.dependsOn buildProxyImage
 dependencies {
   def deps = rootProject.dependencyMap
 
-  implementation deps['com.beust:jcommander']
   implementation deps['com.google.api-client:google-api-client']
   implementation deps['com.google.apis:google-api-services-cloudkms']
   implementation deps['com.google.apis:google-api-services-monitoring']
@@ -62,10 +59,10 @@ dependencies {
   implementation deps['io.netty:netty-common']
   implementation deps['io.netty:netty-handler']
   implementation deps['io.netty:netty-transport']
-  implementation deps['javax.inject:javax.inject']
+  implementation deps['jakarta.inject:jakarta.inject-api']
   implementation deps['joda-time:joda-time']
-  implementation deps['org.bouncycastle:bcpkix-jdk15on']
-  implementation deps['org.bouncycastle:bcprov-jdk15on']
+  implementation deps['org.bouncycastle:bcpkix-jdk18on']
+  implementation deps['org.bouncycastle:bcprov-jdk18on']
   implementation project(':common')
   implementation project(':networking')
   implementation project(':util')
@@ -77,6 +74,7 @@ dependencies {
   testImplementation deps['com.google.monitoring-client:contrib']
   testImplementation deps['com.google.truth:truth']
   testImplementation deps['junit:junit']
+  implementation deps['org.jcommander:jcommander']
   testImplementation deps['org.junit.jupiter:junit-jupiter-api']
   testImplementation deps['org.junit.jupiter:junit-jupiter-engine']
   testImplementation deps['org.junit.jupiter:junit-jupiter-params']

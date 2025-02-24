@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE Configure PUBLIC "-//Jetty//Configure//EN" "https://eclipse.dev/jetty/configure_10_0.dtd">
+
+<Configure id="wac" class="org.eclipse.jetty.ee10.webapp.WebAppContext">
+  <Set name="contextPath">/</Set>
+  <Set name="war">./webapps/nomulus.war</Set>
+  <Call class="java.lang.System" name="setProperty">
+    <Arg>google.registry.jetty</Arg>
+    <Arg>true</Arg>
+  </Call>
+</Configure>

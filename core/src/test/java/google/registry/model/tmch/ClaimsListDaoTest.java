@@ -15,7 +15,6 @@
 package google.registry.model.tmch;
 
 import static com.google.common.truth.Truth.assertThat;
-import static com.google.common.truth.Truth8.assertThat;
 import static google.registry.persistence.transaction.TransactionManagerFactory.tm;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
@@ -24,8 +23,8 @@ import google.registry.persistence.transaction.JpaTestExtensions;
 import google.registry.persistence.transaction.JpaTestExtensions.JpaIntegrationWithCoverageExtension;
 import google.registry.testing.FakeClock;
 import google.registry.testing.TestCacheExtension;
+import jakarta.persistence.PersistenceException;
 import java.time.Duration;
-import javax.persistence.PersistenceException;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.RegisterExtension;
 
